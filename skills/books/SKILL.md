@@ -14,13 +14,14 @@ Use the repo helpers from `/home/exedev/books` rather than ad hoc commands:
 - Convert only when needed with `./scripts/books import --convert /path/to/file`.
 - Use Anna's Archive MCP/CLI through `./scripts/books anna ...` after the user's API key is configured.
 - Show Crosspoint setup values with `./scripts/books opds-url`.
+- Show the owner-only Calibre-Web reader URL with `./scripts/books web-url`.
 - Show documented exe.dev proxy commands with `./scripts/books proxy-commands`.
 
 Only use acquisition/download tooling for material the user is legally permitted to access, such as public domain, Creative Commons, owned, or otherwise authorized works. When unclear, ask for confirmation before downloading.
 
 ## Service Rules
 
-Treat git as the source of truth for installs and config. Do not manually change `/etc/nginx/conf.d/books.conf`, `/etc/systemd/system/books-calibre.service`, `/opt/books/bin/*`, or `/etc/books/books.env` without also updating the repo script/template that recreates it.
+Treat git as the source of truth for installs and config. Do not manually change `/etc/nginx/conf.d/books.conf`, `/etc/systemd/system/books-calibre.service`, `/etc/systemd/system/books-calibre-web.service`, `/opt/books/bin/*`, or `/etc/books/books.env` without also updating the repo script/template that recreates it.
 
 Runtime books and secrets are intentionally outside git:
 
@@ -28,5 +29,6 @@ Runtime books and secrets are intentionally outside git:
 - `/srv/books/library`
 - `/srv/books/downloads`
 - `/srv/books/import`
+- `/srv/books/calibre-web`
 
-Read `references/service.md` before changing deployment, nginx, systemd, OPDS, Anna's Archive, or import behavior.
+Read `references/service.md` before changing deployment, nginx, systemd, Calibre-Web, OPDS, Anna's Archive, or import behavior.

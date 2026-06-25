@@ -23,6 +23,11 @@ upstream books_calibre {
     keepalive 16;
 }
 
+upstream books_calibre_web {
+    server 127.0.0.1:__CALIBRE_WEB_PORT__;
+    keepalive 16;
+}
+
 server {
     listen __BOOKS_PROXY_PORT__;
     server_name _;
@@ -57,7 +62,12 @@ server {
         proxy_pass http://books_calibre;
     }
 
-    # Browser UI requires exe.dev auth for the owner email before calibre sees it.
+    # Keep unused calibre-web Kobo sync endpoints dark unless intentionally enabled later.
+    location ^~ /kobo {
+        return 404;
+    }
+
+    # Browser UI requires exe.dev auth for the owner email before calibre-web sees it.
     location / {
         if ($books_has_exedev_user = 0) {
             return 302 https://$http_host/__exe.dev/login?redirect=$request_uri;
@@ -65,6 +75,6 @@ server {
         if ($books_exedev_owner = 0) {
             return 403;
         }
-        proxy_pass http://books_calibre;
+        proxy_pass http://books_calibre_web;
     }
 }

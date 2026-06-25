@@ -8,6 +8,7 @@ OPT_DIR=/opt/books
 OPT_BIN="${OPT_DIR}/bin"
 NGINX_CONF=/etc/nginx/conf.d/books.conf
 SYSTEMD_UNIT=/etc/systemd/system/books-calibre.service
+CALIBRE_WEB_SYSTEMD_UNIT=/etc/systemd/system/books-calibre-web.service
 ORIGINAL_ARGS=("$@")
 
 if [[ ${EUID} -ne 0 ]]; then
@@ -33,6 +34,7 @@ Usage: ./scripts/onboard [--non-interactive] [--skip-start]
 
 Installs and configures the personal books service:
   - official calibre binary
+  - Calibre-Web web reader
   - Anna's Archive MCP/CLI binary
   - /etc/books/books.env
   - /srv/books data directories
@@ -137,8 +139,15 @@ shell_quote() {
   printf "'%s'" "${value//\'/\'\\\'\'}"
 }
 
+sql_literal() {
+  local value="$1"
+  printf "'%s'" "${value//\'/\'\'}"
+}
+
 write_env() {
+  local old_umask
   install -d -m 0755 "${ENV_DIR}"
+  old_umask="$(umask)"
   umask 077
   {
     printf 'BOOKS_PUBLIC_HOST=%s\n' "$(shell_quote "${BOOKS_PUBLIC_HOST}")"
@@ -158,6 +167,13 @@ write_env() {
     printf 'CALIBRE_ADMIN_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_ADMIN_PASSWORD}")"
     printf 'CALIBRE_OPDS_USER=%s\n' "$(shell_quote "${CALIBRE_OPDS_USER}")"
     printf 'CALIBRE_OPDS_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_OPDS_PASSWORD}")"
+    printf 'CALIBRE_WEB_PORT=%s\n' "$(shell_quote "${CALIBRE_WEB_PORT}")"
+    printf 'CALIBRE_WEB_VERSION=%s\n' "$(shell_quote "${CALIBRE_WEB_VERSION}")"
+    printf 'CALIBRE_WEB_DIR=%s\n' "$(shell_quote "${CALIBRE_WEB_DIR}")"
+    printf 'CALIBRE_WEB_DB=%s\n' "$(shell_quote "${CALIBRE_WEB_DB}")"
+    printf 'CALIBRE_WEB_GDRIVE_DB=%s\n' "$(shell_quote "${CALIBRE_WEB_GDRIVE_DB}")"
+    printf 'CALIBRE_WEB_ADMIN_USER=%s\n' "$(shell_quote "${CALIBRE_WEB_ADMIN_USER}")"
+    printf 'CALIBRE_WEB_ADMIN_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_WEB_ADMIN_PASSWORD}")"
     printf 'ANNAS_VERSION=%s\n' "$(shell_quote "${ANNAS_VERSION}")"
     printf 'ANNAS_BASE_URL=%s\n' "$(shell_quote "${ANNAS_BASE_URL}")"
     printf 'ANNAS_SECRET_KEY=%s\n' "$(shell_quote "${ANNAS_SECRET_KEY}")"
@@ -166,6 +182,12 @@ write_env() {
     printf 'BOOKS_DEFAULT_TAGS=%s\n' "$(shell_quote "${BOOKS_DEFAULT_TAGS}")"
   } > "${ENV_FILE}"
   chmod 0600 "${ENV_FILE}"
+  umask "${old_umask}"
+}
+
+ensure_env_permissions() {
+  chown root:books "${ENV_FILE}"
+  chmod 0640 "${ENV_FILE}"
 }
 
 ensure_packages() {
@@ -176,6 +198,9 @@ ensure_packages() {
     jq \
     nginx \
     python3 \
+    python3-venv \
+    sqlite3 \
+    libmagic1 \
     wget \
     xdg-utils \
     xz-utils \
@@ -202,6 +227,26 @@ ensure_calibre() {
   else
     wget -nv -O- https://download.calibre-ebook.com/linux-installer.sh | sh /dev/stdin
   fi
+}
+
+ensure_calibre_web() {
+  local venv="${OPT_DIR}/calibre-web-venv"
+  local installed_version=""
+
+  install -d -m 0755 "${OPT_DIR}"
+
+  if [[ -x "${venv}/bin/cps" ]]; then
+    installed_version="$("${venv}/bin/cps" --version 2>/dev/null | sed -nE 's/^Calibre-Web version: ([^ ]+).*/\1/p')"
+  fi
+
+  if [[ "${installed_version}" != "${CALIBRE_WEB_VERSION}" ]]; then
+    rm -rf "${venv}"
+    (umask 022 && python3 -m venv "${venv}")
+    HOME=/root "${venv}/bin/pip" install --upgrade pip
+    HOME=/root "${venv}/bin/pip" install "calibreweb==${CALIBRE_WEB_VERSION}"
+  fi
+  HOME=/root "${venv}/bin/pip" install "greenlet>=0.4.17,<3.3.0"
+  chmod -R a+rX "${venv}"
 }
 
 annas_asset_suffix() {
@@ -252,10 +297,93 @@ ensure_users_and_dirs() {
   fi
 
   install -d -o books -g books -m 0750 "${BOOKS_DATA_DIR}" "${BOOKS_CONFIG_DIR}" "${BOOKS_LOG_DIR}"
+  install -d -o books -g books -m 0750 "${CALIBRE_WEB_DIR}"
   install -d -o books -g books -m 2770 "${BOOKS_LIBRARY_DIR}" "${BOOKS_DOWNLOAD_DIR}" "${BOOKS_IMPORT_DIR}"
   if [[ ! -f "${BOOKS_LIBRARY_DIR}/metadata.db" ]]; then
     runuser -u books -- calibredb --with-library "${BOOKS_LIBRARY_DIR}" list >/dev/null
   fi
+}
+
+ensure_calibre_web_db() {
+  local old_user=""
+  local calibre_dir_sql log_sql access_log_sql converter_sql binaries_sql admin_user_sql email_sql
+
+  calibre_web_db_ready() {
+    [[ -f "${CALIBRE_WEB_DB}" ]] &&
+      sqlite3 "file:${CALIBRE_WEB_DB}?mode=ro" "select 1 from settings limit 1;" >/dev/null 2>&1
+  }
+
+  if ! calibre_web_db_ready; then
+    rm -f "${CALIBRE_WEB_DB}" "${CALIBRE_WEB_GDRIVE_DB}"
+    runuser -u books -- env HOME="${BOOKS_DATA_DIR}" \
+      "${OPT_DIR}/calibre-web-venv/bin/cps" \
+      -p "${CALIBRE_WEB_DB}" \
+      -g "${CALIBRE_WEB_GDRIVE_DB}" \
+      -i 127.0.0.1 \
+      -o "${BOOKS_LOG_DIR}/calibre-web-bootstrap.log" >/tmp/books-calibre-web-bootstrap.log 2>&1 &
+    local pid=$!
+    for _ in $(seq 1 40); do
+      if calibre_web_db_ready; then
+        break
+      fi
+      sleep 0.5
+    done
+    kill "${pid}" 2>/dev/null || true
+    wait "${pid}" 2>/dev/null || true
+    if ! calibre_web_db_ready; then
+      echo "Calibre-Web failed to bootstrap ${CALIBRE_WEB_DB}." >&2
+      sed -n '1,160p' /tmp/books-calibre-web-bootstrap.log >&2 || true
+      exit 1
+    fi
+  fi
+
+  calibre_dir_sql="$(sql_literal "${BOOKS_LIBRARY_DIR}")"
+  log_sql="$(sql_literal "${BOOKS_LOG_DIR}/calibre-web.log")"
+  access_log_sql="$(sql_literal "${BOOKS_LOG_DIR}/calibre-web-access.log")"
+  converter_sql="$(sql_literal "/usr/bin/ebook-convert")"
+  binaries_sql="$(sql_literal "/opt/calibre/")"
+  admin_user_sql="$(sql_literal "${CALIBRE_WEB_ADMIN_USER}")"
+  email_sql="$(sql_literal "${BOOKS_ALLOWED_EMAIL}")"
+
+  sqlite3 "${CALIBRE_WEB_DB}" <<SQL
+update settings
+set config_calibre_dir = ${calibre_dir_sql},
+    config_port = ${CALIBRE_WEB_PORT},
+    config_external_port = 443,
+    config_calibre_web_title = 'Books',
+    config_logfile = ${log_sql},
+    config_access_log = 1,
+    config_access_logfile = ${access_log_sql},
+    config_uploading = 0,
+    config_anonbrowse = 0,
+    config_public_reg = 0,
+    config_remote_login = 0,
+    config_kobo_sync = 0,
+    config_kobo_proxy = 0,
+    config_register_email = 0,
+    config_converterpath = ${converter_sql},
+    config_binariesdir = ${binaries_sql},
+    config_embed_metadata = 0,
+    config_updatechannel = 0,
+    config_password_policy = 0,
+    config_ratelimiter = 1
+where id = 1;
+SQL
+
+  if sqlite3 "${CALIBRE_WEB_DB}" "select 1 from user where name=${admin_user_sql} limit 1;" | grep -q 1; then
+    "${OPT_DIR}/calibre-web-venv/bin/cps" -p "${CALIBRE_WEB_DB}" -g "${CALIBRE_WEB_GDRIVE_DB}" -s "${CALIBRE_WEB_ADMIN_USER}:${CALIBRE_WEB_ADMIN_PASSWORD}" >/dev/null
+  else
+    old_user="$(sqlite3 "${CALIBRE_WEB_DB}" "select name from user where id=1;")"
+    "${OPT_DIR}/calibre-web-venv/bin/cps" -p "${CALIBRE_WEB_DB}" -g "${CALIBRE_WEB_GDRIVE_DB}" -s "${old_user}:${CALIBRE_WEB_ADMIN_PASSWORD}" >/dev/null
+    sqlite3 "${CALIBRE_WEB_DB}" "update user set name=${admin_user_sql}, email=${email_sql}, locale='en', default_language='all' where id=1;"
+  fi
+
+  chown -R books:books "${CALIBRE_WEB_DIR}"
+  chmod 0750 "${CALIBRE_WEB_DIR}"
+  chmod 0640 "${CALIBRE_WEB_DB}" "${CALIBRE_WEB_GDRIVE_DB}" 2>/dev/null || true
+  touch "${BOOKS_LOG_DIR}/calibre-web.log" "${BOOKS_LOG_DIR}/calibre-web-access.log"
+  chown books:books "${BOOKS_LOG_DIR}/calibre-web.log" "${BOOKS_LOG_DIR}/calibre-web-access.log"
+  chmod 0644 "${BOOKS_LOG_DIR}/calibre-web.log" "${BOOKS_LOG_DIR}/calibre-web-access.log"
 }
 
 calibre_user_exists() {
@@ -297,6 +425,7 @@ render_template() {
     -e "s|__BOOKS_ALLOWED_EMAIL__|${BOOKS_ALLOWED_EMAIL}|g" \
     -e "s|__BOOKS_PROXY_PORT__|${BOOKS_PROXY_PORT}|g" \
     -e "s|__CALIBRE_PORT__|${CALIBRE_PORT}|g" \
+    -e "s|__CALIBRE_WEB_PORT__|${CALIBRE_WEB_PORT}|g" \
     "${src}" > "${tmp}"
   install -m 0644 "${tmp}" "${dest}"
   rm -f "${tmp}"
@@ -310,6 +439,7 @@ install_wrappers() {
 
 install_services() {
   install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre.service" "${SYSTEMD_UNIT}"
+  install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre-web.service" "${CALIBRE_WEB_SYSTEMD_UNIT}"
   render_template "${ROOT_DIR}/config/nginx/books.conf.template" "${NGINX_CONF}"
   if [[ -L /etc/nginx/sites-enabled/default ]]; then
     rm -f /etc/nginx/sites-enabled/default
@@ -318,6 +448,7 @@ install_services() {
   nginx -t
   if [[ "${skip_start}" != true ]]; then
     systemctl enable --now books-calibre
+    systemctl enable --now books-calibre-web
     systemctl enable --now nginx
     systemctl reload nginx
   fi
@@ -350,6 +481,8 @@ ask CALIBRE_ADMIN_USER "Calibre admin user" "${CALIBRE_ADMIN_USER:-neil}"
 ask_secret CALIBRE_ADMIN_PASSWORD "Calibre admin password" "${CALIBRE_ADMIN_PASSWORD:-}"
 ask CALIBRE_OPDS_USER "Crosspoint/OPDS user" "${CALIBRE_OPDS_USER:-crosspoint}"
 ask_secret CALIBRE_OPDS_PASSWORD "Crosspoint/OPDS password" "${CALIBRE_OPDS_PASSWORD:-}"
+ask CALIBRE_WEB_PORT "Calibre-Web localhost port" "${CALIBRE_WEB_PORT:-8083}"
+ask CALIBRE_WEB_VERSION "Calibre-Web version" "${CALIBRE_WEB_VERSION:-0.6.26}"
 ask ANNAS_VERSION "Anna's Archive MCP version" "${ANNAS_VERSION:-v0.0.5}"
 ask ANNAS_BASE_URL "Anna's Archive mirror host" "${ANNAS_BASE_URL:-annas-archive.li}"
 ask_optional_secret ANNAS_SECRET_KEY "Anna's Archive API key" "${ANNAS_SECRET_KEY:-}"
@@ -357,18 +490,29 @@ ask_optional_secret ANNAS_SECRET_KEY "Anna's Archive API key" "${ANNAS_SECRET_KE
 ANNAS_DOWNLOAD_PATH="${ANNAS_DOWNLOAD_PATH:-${BOOKS_DOWNLOAD_DIR}}"
 BOOKS_DEFAULT_LANGUAGE="${BOOKS_DEFAULT_LANGUAGE:-eng}"
 BOOKS_DEFAULT_TAGS="${BOOKS_DEFAULT_TAGS:-agent-imported}"
+CALIBRE_WEB_DIR="${CALIBRE_WEB_DIR:-${BOOKS_DATA_DIR}/calibre-web}"
+CALIBRE_WEB_DB="${CALIBRE_WEB_DB:-${CALIBRE_WEB_DIR}/app.db}"
+CALIBRE_WEB_GDRIVE_DB="${CALIBRE_WEB_GDRIVE_DB:-${CALIBRE_WEB_DIR}/gdrive.db}"
+CALIBRE_WEB_ADMIN_USER="${CALIBRE_WEB_ADMIN_USER:-${CALIBRE_ADMIN_USER}}"
+if [[ -z "${CALIBRE_WEB_ADMIN_PASSWORD:-}" ]]; then
+  CALIBRE_WEB_ADMIN_PASSWORD="${CALIBRE_ADMIN_PASSWORD}"
+fi
 
 write_env
 ensure_packages
 ensure_calibre
+ensure_calibre_web
 ensure_users_and_dirs
+ensure_env_permissions
 ensure_annas_mcp
 install_wrappers
 ensure_calibre_userdb
+ensure_calibre_web_db
 install_services
 install_skill
 
 echo "Books service configured."
 echo "Local health: http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz"
+echo "Calibre-Web URL: https://${BOOKS_PUBLIC_HOST}/"
 echo "OPDS URL for Crosspoint: https://${BOOKS_PUBLIC_HOST}/opds"
 echo "Run ./scripts/books proxy-commands for the documented exe.dev share commands."

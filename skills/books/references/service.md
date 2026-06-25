@@ -9,14 +9,16 @@
 - Import/conversion staging: `/srv/books/import`
 - Service logs: `/srv/books/log`
 - Calibre service: `books-calibre`
+- Calibre-Web service: `books-calibre-web`
 - Public host: `books.exe.xyz`
 
 ## Routing
 
-Nginx listens on `BOOKS_PROXY_PORT` and proxies Calibre on `127.0.0.1:${CALIBRE_PORT}`.
+Nginx listens on `BOOKS_PROXY_PORT`, proxies native Calibre on `127.0.0.1:${CALIBRE_PORT}`, and proxies Calibre-Web on `127.0.0.1:${CALIBRE_WEB_PORT}`.
 
 - `/opds` and `/get/...` are open at nginx and protected by Calibre Basic auth for Crosspoint.
-- Other routes require `X-ExeDev-Email` to match `BOOKS_ALLOWED_EMAIL`, then Calibre auth.
+- Other routes require `X-ExeDev-Email` to match `BOOKS_ALLOWED_EMAIL`, then Calibre-Web auth.
+- Calibre-Web Kobo routes are blocked at nginx unless intentionally enabled later.
 - If the exe.dev proxy is public, unauthenticated browser UI requests redirect to `/__exe.dev/login`.
 
 Do not add undocumented exe.dev endpoints. Use only documented commands such as:

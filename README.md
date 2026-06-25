@@ -8,14 +8,18 @@ The repo is the source of truth. Runtime data and secrets live outside git:
 - `/srv/books/library`: Calibre library, not committed
 - `/srv/books/downloads`: staged downloads, not committed
 - `/srv/books/import`: temporary conversion/import files, not committed
+- `/srv/books/log`: service logs, not committed
+- `/srv/books/calibre-web`: Calibre-Web settings DB, not committed
 
 ## Architecture
 
 - `nginx` listens on `BOOKS_PROXY_PORT` (`8000` by default) for the exe.dev HTTPS proxy.
 - `calibre-server` listens only on `127.0.0.1:8080`.
+- `calibre-web` listens only on `127.0.0.1:8083` and provides the owner-only web UI/reader.
 - `/opds` and `/get/...` pass through to Calibre so Crosspoint can use Calibre Basic auth.
-- All other Calibre browser UI routes require `X-ExeDev-Email: neil.skaria@gmail.com` from exe.dev before they reach Calibre.
-- Calibre itself still uses username/password auth for both OPDS and UI.
+- All other browser UI routes require `X-ExeDev-Email: neil.skaria@gmail.com` from exe.dev before they reach Calibre-Web.
+- Calibre-Web still uses its own username/password login.
+- Calibre-Web Kobo routes are blocked at nginx because Crosspoint uses native Calibre OPDS and Kobo sync is not needed.
 
 This follows the documented exe.dev proxy behavior: the proxy forwards standard `X-Forwarded-*` headers and, for authenticated users, adds `X-ExeDev-Email`. Public/private access is controlled with documented `ssh exe.dev share ...` commands.
 
@@ -29,9 +33,11 @@ cd /home/exedev/books
 The onboarding command installs:
 
 - official Calibre for Linux pinned by `CALIBRE_VERSION`
+- Calibre-Web pinned by `CALIBRE_WEB_VERSION`
 - Anna's Archive MCP/CLI `v0.0.5`
 - nginx config from `config/nginx/books.conf.template`
 - systemd unit from `config/systemd/books-calibre.service`
+- systemd unit from `config/systemd/books-calibre-web.service`
 - wrappers in `/opt/books/bin`
 - the repo-local Codex `$books` skill symlink
 
@@ -64,12 +70,21 @@ https://books.exe.xyz/opds
 
 Use the `CALIBRE_OPDS_USER` and `CALIBRE_OPDS_PASSWORD` stored in `/etc/books/books.env`.
 
+The owner-only web reader is:
+
+```text
+https://books.exe.xyz/
+```
+
+Use the `CALIBRE_WEB_ADMIN_USER` and `CALIBRE_WEB_ADMIN_PASSWORD` stored in `/etc/books/books.env`.
+
 ## Operations
 
 ```bash
 ./scripts/books status
 ./scripts/books health
 ./scripts/books restart
+./scripts/books web-url
 ./scripts/books opds-url
 ./scripts/books proxy-commands
 ```
@@ -103,4 +118,5 @@ Only use acquisition tools for books you are legally permitted to access, such a
 - exe.dev share CLI: https://exe.dev/docs/cli-share
 - Calibre content server: https://manual.calibre-ebook.com/server.html
 - `calibre-server` CLI: https://manual.calibre-ebook.com/generated/en/calibre-server.html
+- Calibre-Web: https://github.com/janeczku/calibre-web
 - Anna's Archive MCP/CLI: https://github.com/iosifache/annas-mcp

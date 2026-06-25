@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMMAND="${1:-}"
 
 case "${COMMAND}" in
-  health|opds-url|proxy-commands)
+  health|web-url|opds-url|proxy-commands)
     if [[ ${EUID} -ne 0 && ! -r /etc/books/books.env ]]; then
       exec sudo "$0" "$@"
     fi
@@ -18,10 +18,11 @@ Usage: ./scripts/books COMMAND [ARGS...]
 
 Commands:
   status                 Show service status
-  health                 Check local nginx and calibre health
-  restart                Restart calibre and reload nginx
+  health                 Check local nginx, calibre, and calibre-web health
+  restart                Restart calibre/calibre-web and reload nginx
   import [--convert] F   Import EPUB files into calibre
   anna ARGS...           Run Anna's Archive MCP/CLI through the configured env
+  web-url                Print the owner-only calibre-web URL
   opds-url               Print the OPDS URL for Crosspoint
   proxy-commands         Print documented exe.dev share commands
   install-skill          Install/symlink the repo books skill into CODEX_HOME
@@ -30,15 +31,17 @@ EOF
 
 case "${COMMAND}" in
   status)
-    systemctl --no-pager --full status books-calibre nginx
+    systemctl --no-pager --full status books-calibre books-calibre-web nginx
     ;;
   health)
     source /etc/books/books.env
     curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz"
     curl -fsSI -u "${CALIBRE_OPDS_USER}:${CALIBRE_OPDS_PASSWORD}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/opds" | sed -n '1,12p'
+    curl -fsSI -H "X-ExeDev-Email: ${BOOKS_ALLOWED_EMAIL}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/login" | sed -n '1,12p'
     ;;
   restart)
     sudo systemctl restart books-calibre
+    sudo systemctl restart books-calibre-web
     sudo nginx -t
     sudo systemctl reload nginx
     ;;
@@ -49,6 +52,12 @@ case "${COMMAND}" in
   anna)
     shift
     sudo /opt/books/bin/books-annas "$@"
+    ;;
+  web-url)
+    source /etc/books/books.env
+    printf 'https://%s/\n' "${BOOKS_PUBLIC_HOST}"
+    printf 'username: %s\n' "${CALIBRE_WEB_ADMIN_USER}"
+    printf 'password: stored in /etc/books/books.env as CALIBRE_WEB_ADMIN_PASSWORD\n'
     ;;
   opds-url)
     source /etc/books/books.env

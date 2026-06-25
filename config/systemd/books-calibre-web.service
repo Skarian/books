@@ -1,0 +1,28 @@
+[Unit]
+Description=Books Calibre-Web reader
+Documentation=https://github.com/janeczku/calibre-web
+After=network-online.target books-calibre.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=books
+Group=books
+Environment=HOME=/srv/books
+EnvironmentFile=/etc/books/books.env
+WorkingDirectory=/srv/books/calibre-web
+ExecStart=/opt/books/calibre-web-venv/bin/cps \
+    -p ${CALIBRE_WEB_DB} \
+    -g ${CALIBRE_WEB_GDRIVE_DB} \
+    -i 127.0.0.1 \
+    -o ${BOOKS_LOG_DIR}/calibre-web.log
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/srv/books
+
+[Install]
+WantedBy=multi-user.target
