@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMMAND="${1:-}"
+
+case "${COMMAND}" in
+  health|opds-url|proxy-commands)
+    if [[ ${EUID} -ne 0 && ! -r /etc/books/books.env ]]; then
+      exec sudo "$0" "$@"
+    fi
+    ;;
+esac
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/books COMMAND [ARGS...]
+
+Commands:
+  status                 Show service status
+  health                 Check local nginx and calibre health
+  restart                Restart calibre and reload nginx
+  import [--convert] F   Import EPUB files into calibre
+  anna ARGS...           Run Anna's Archive MCP/CLI through the configured env
+  opds-url               Print the OPDS URL for Crosspoint
+  proxy-commands         Print documented exe.dev share commands
+  install-skill          Install/symlink the repo books skill into CODEX_HOME
+EOF
+}
+
+case "${COMMAND}" in
+  status)
+    systemctl --no-pager --full status books-calibre nginx
+    ;;
+  health)
+    source /etc/books/books.env
+    curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz"
+    curl -fsSI -u "${CALIBRE_OPDS_USER}:${CALIBRE_OPDS_PASSWORD}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/opds" | sed -n '1,12p'
+    ;;
+  restart)
+    sudo systemctl restart books-calibre
+    sudo nginx -t
+    sudo systemctl reload nginx
+    ;;
+  import)
+    shift
+    sudo /opt/books/bin/books-import "$@"
+    ;;
+  anna)
+    shift
+    sudo /opt/books/bin/books-annas "$@"
+    ;;
+  opds-url)
+    source /etc/books/books.env
+    printf 'https://%s/opds\n' "${BOOKS_PUBLIC_HOST}"
+    printf 'username: %s\n' "${CALIBRE_OPDS_USER}"
+    printf 'password: stored in /etc/books/books.env as CALIBRE_OPDS_PASSWORD\n'
+    ;;
+  proxy-commands)
+    source /etc/books/books.env
+    vm="${BOOKS_PUBLIC_HOST%%.*}"
+    cat <<EOF
+Run these from your local machine, per exe.dev docs:
+
+ssh exe.dev share port ${vm} ${BOOKS_PROXY_PORT}
+ssh exe.dev share set-public ${vm}
+
+To return to private access:
+ssh exe.dev share set-private ${vm}
+EOF
+    ;;
+  install-skill)
+    "${ROOT_DIR}/scripts/install-skill"
+    ;;
+  -h|--help|"")
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,374 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_DIR=/etc/books
+ENV_FILE="${ENV_DIR}/books.env"
+OPT_DIR=/opt/books
+OPT_BIN="${OPT_DIR}/bin"
+NGINX_CONF=/etc/nginx/conf.d/books.conf
+SYSTEMD_UNIT=/etc/systemd/system/books-calibre.service
+ORIGINAL_ARGS=("$@")
+
+if [[ ${EUID} -ne 0 ]]; then
+  exec sudo -E "$0" "${ORIGINAL_ARGS[@]}"
+fi
+
+non_interactive=false
+skip_start=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --non-interactive)
+      non_interactive=true
+      shift
+      ;;
+    --skip-start)
+      skip_start=true
+      shift
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: ./scripts/onboard [--non-interactive] [--skip-start]
+
+Installs and configures the personal books service:
+  - official calibre binary
+  - Anna's Archive MCP/CLI binary
+  - /etc/books/books.env
+  - /srv/books data directories
+  - books-calibre systemd service
+  - nginx gate on BOOKS_PROXY_PORT
+  - repo-local Codex books skill symlink
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+load_existing_env() {
+  if [[ -r "${ENV_FILE}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${ENV_FILE}"
+    set +a
+  fi
+}
+
+rand_secret() {
+  local value
+  value="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true)"
+  printf '%s' "${value}"
+}
+
+ask() {
+  local name="$1"
+  local prompt="$2"
+  local default="$3"
+  local value
+
+  if [[ "${non_interactive}" == true ]]; then
+    printf -v "${name}" '%s' "${default}"
+    return
+  fi
+
+  read -r -p "${prompt} [${default}]: " value
+  printf -v "${name}" '%s' "${value:-${default}}"
+}
+
+ask_secret() {
+  local name="$1"
+  local prompt="$2"
+  local existing="${3:-}"
+  local value generated
+
+  if [[ "${non_interactive}" == true ]]; then
+    if [[ -n "${existing}" ]]; then
+      printf -v "${name}" '%s' "${existing}"
+    else
+      generated="$(rand_secret)"
+      printf -v "${name}" '%s' "${generated}"
+    fi
+    return
+  fi
+
+  if [[ -n "${existing}" ]]; then
+    read -r -s -p "${prompt} [leave blank to keep existing]: " value
+    echo
+    printf -v "${name}" '%s' "${value:-${existing}}"
+  else
+    read -r -s -p "${prompt} [leave blank to generate]: " value
+    echo
+    if [[ -z "${value}" ]]; then
+      value="$(rand_secret)"
+      echo "Generated ${name}."
+    fi
+    printf -v "${name}" '%s' "${value}"
+  fi
+}
+
+ask_optional_secret() {
+  local name="$1"
+  local prompt="$2"
+  local existing="${3:-}"
+  local value
+
+  if [[ "${non_interactive}" == true ]]; then
+    printf -v "${name}" '%s' "${existing}"
+    return
+  fi
+
+  if [[ -n "${existing}" ]]; then
+    read -r -s -p "${prompt} [leave blank to keep existing]: " value
+    echo
+    printf -v "${name}" '%s' "${value:-${existing}}"
+  else
+    read -r -s -p "${prompt} [leave blank to skip for now]: " value
+    echo
+    printf -v "${name}" '%s' "${value}"
+  fi
+}
+
+shell_quote() {
+  local value="$1"
+  printf "'%s'" "${value//\'/\'\\\'\'}"
+}
+
+write_env() {
+  install -d -m 0755 "${ENV_DIR}"
+  umask 077
+  {
+    printf 'BOOKS_PUBLIC_HOST=%s\n' "$(shell_quote "${BOOKS_PUBLIC_HOST}")"
+    printf 'BOOKS_ALLOWED_EMAIL=%s\n' "$(shell_quote "${BOOKS_ALLOWED_EMAIL}")"
+    printf 'BOOKS_PROXY_PORT=%s\n' "$(shell_quote "${BOOKS_PROXY_PORT}")"
+    printf 'BOOKS_DATA_DIR=%s\n' "$(shell_quote "${BOOKS_DATA_DIR}")"
+    printf 'BOOKS_LIBRARY_DIR=%s\n' "$(shell_quote "${BOOKS_LIBRARY_DIR}")"
+    printf 'BOOKS_DOWNLOAD_DIR=%s\n' "$(shell_quote "${BOOKS_DOWNLOAD_DIR}")"
+    printf 'BOOKS_IMPORT_DIR=%s\n' "$(shell_quote "${BOOKS_IMPORT_DIR}")"
+    printf 'BOOKS_LOG_DIR=%s\n' "$(shell_quote "${BOOKS_LOG_DIR}")"
+    printf 'BOOKS_CONFIG_DIR=%s\n' "$(shell_quote "${BOOKS_CONFIG_DIR}")"
+    printf 'BOOKS_USERDB=%s\n' "$(shell_quote "${BOOKS_USERDB}")"
+    printf 'BOOKS_CALIBRE_LIBRARY_ID=%s\n' "$(shell_quote "${BOOKS_CALIBRE_LIBRARY_ID}")"
+    printf 'CALIBRE_PORT=%s\n' "$(shell_quote "${CALIBRE_PORT}")"
+    printf 'CALIBRE_VERSION=%s\n' "$(shell_quote "${CALIBRE_VERSION}")"
+    printf 'CALIBRE_ADMIN_USER=%s\n' "$(shell_quote "${CALIBRE_ADMIN_USER}")"
+    printf 'CALIBRE_ADMIN_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_ADMIN_PASSWORD}")"
+    printf 'CALIBRE_OPDS_USER=%s\n' "$(shell_quote "${CALIBRE_OPDS_USER}")"
+    printf 'CALIBRE_OPDS_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_OPDS_PASSWORD}")"
+    printf 'ANNAS_VERSION=%s\n' "$(shell_quote "${ANNAS_VERSION}")"
+    printf 'ANNAS_BASE_URL=%s\n' "$(shell_quote "${ANNAS_BASE_URL}")"
+    printf 'ANNAS_SECRET_KEY=%s\n' "$(shell_quote "${ANNAS_SECRET_KEY}")"
+    printf 'ANNAS_DOWNLOAD_PATH=%s\n' "$(shell_quote "${ANNAS_DOWNLOAD_PATH}")"
+    printf 'BOOKS_DEFAULT_LANGUAGE=%s\n' "$(shell_quote "${BOOKS_DEFAULT_LANGUAGE}")"
+    printf 'BOOKS_DEFAULT_TAGS=%s\n' "$(shell_quote "${BOOKS_DEFAULT_TAGS}")"
+  } > "${ENV_FILE}"
+  chmod 0600 "${ENV_FILE}"
+}
+
+ensure_packages() {
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    ca-certificates \
+    curl \
+    jq \
+    nginx \
+    python3 \
+    wget \
+    xdg-utils \
+    xz-utils \
+    libxcb-cursor0 \
+    libopengl0
+}
+
+ensure_calibre() {
+  local current_version=""
+  if command -v ebook-convert >/dev/null 2>&1; then
+    current_version="$(ebook-convert --version | awk 'NR==1 {gsub(/[()]/, "", $3); print $3}')"
+  fi
+
+  if [[ -n "${current_version}" && ( -z "${CALIBRE_VERSION:-}" || "${current_version}" == "${CALIBRE_VERSION}" ) ]]; then
+    return
+  fi
+
+  if [[ -n "${current_version}" && -n "${CALIBRE_VERSION:-}" && "${current_version}" != "${CALIBRE_VERSION}" ]] && command -v calibre-uninstall >/dev/null 2>&1; then
+    calibre-uninstall || true
+  fi
+
+  if [[ -n "${CALIBRE_VERSION:-}" ]]; then
+    wget -nv -O- https://download.calibre-ebook.com/linux-installer.sh | sh /dev/stdin "version=${CALIBRE_VERSION}"
+  else
+    wget -nv -O- https://download.calibre-ebook.com/linux-installer.sh | sh /dev/stdin
+  fi
+}
+
+annas_asset_suffix() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo "linux_amd64" ;;
+    aarch64|arm64) echo "linux_arm64" ;;
+    armv7l|armv6l) echo "linux_arm" ;;
+    *)
+      echo "Unsupported architecture for annas-mcp: $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+ensure_annas_mcp() {
+  install -d -m 0755 "${OPT_BIN}"
+  local version_no_v="${ANNAS_VERSION#v}"
+  local suffix asset checksums url tmpdir
+  suffix="$(annas_asset_suffix)"
+  asset="annas-mcp_${version_no_v}_${suffix}.tar.xz"
+  checksums="annas-mcp_${version_no_v}--checksums.txt"
+  url="https://github.com/iosifache/annas-mcp/releases/download/${ANNAS_VERSION}"
+
+  if [[ -x "${OPT_BIN}/annas-mcp" ]] && "${OPT_BIN}/annas-mcp" --version 2>/dev/null | grep -q "${version_no_v}"; then
+    return
+  fi
+
+  tmpdir="$(mktemp -d)"
+  curl -fsSLo "${tmpdir}/${asset}" "${url}/${asset}"
+  curl -fsSLo "${tmpdir}/${checksums}" "${url}/${checksums}"
+  (cd "${tmpdir}" && grep "  ${asset}$" "${checksums}" | sha256sum -c -)
+  tar -xJf "${tmpdir}/${asset}" -C "${tmpdir}"
+  install -m 0755 "$(find "${tmpdir}" -type f -name annas-mcp | head -n 1)" "${OPT_BIN}/annas-mcp"
+  touch "${OPT_BIN}/.env"
+  chmod 0644 "${OPT_BIN}/.env"
+  rm -rf "${tmpdir}"
+}
+
+ensure_users_and_dirs() {
+  if ! getent group books >/dev/null; then
+    groupadd --system books
+  fi
+  if ! id books >/dev/null 2>&1; then
+    useradd --system --gid books --home-dir "${BOOKS_DATA_DIR}" --shell /usr/sbin/nologin books
+  fi
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    usermod -aG books "${SUDO_USER}" || true
+  fi
+
+  install -d -o books -g books -m 0750 "${BOOKS_DATA_DIR}" "${BOOKS_CONFIG_DIR}" "${BOOKS_LOG_DIR}"
+  install -d -o books -g books -m 2770 "${BOOKS_LIBRARY_DIR}" "${BOOKS_DOWNLOAD_DIR}" "${BOOKS_IMPORT_DIR}"
+  if [[ ! -f "${BOOKS_LIBRARY_DIR}/metadata.db" ]]; then
+    runuser -u books -- calibredb --with-library "${BOOKS_LIBRARY_DIR}" list >/dev/null
+  fi
+}
+
+calibre_user_exists() {
+  calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- list | grep -Fxq "$1"
+}
+
+ensure_calibre_user() {
+  local user="$1"
+  local password="$2"
+  local readonly="$3"
+  local can_change_password="$4"
+
+  if calibre_user_exists "${user}"; then
+    calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- chpass "${user}" "${password}"
+  else
+    if [[ "${readonly}" == "set" ]]; then
+      calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- add "${user}" "${password}" --readonly
+    else
+      calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- add "${user}" "${password}"
+    fi
+  fi
+  calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- readonly "${user}" "${readonly}"
+  calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- change_set_password "${user}" "${can_change_password}"
+}
+
+ensure_calibre_userdb() {
+  ensure_calibre_user "${CALIBRE_OPDS_USER}" "${CALIBRE_OPDS_PASSWORD}" set reset
+  ensure_calibre_user "${CALIBRE_ADMIN_USER}" "${CALIBRE_ADMIN_PASSWORD}" reset set
+  chown books:books "${BOOKS_USERDB}"
+  chmod 0660 "${BOOKS_USERDB}"
+}
+
+render_template() {
+  local src="$1"
+  local dest="$2"
+  local tmp
+  tmp="$(mktemp)"
+  sed \
+    -e "s|__BOOKS_ALLOWED_EMAIL__|${BOOKS_ALLOWED_EMAIL}|g" \
+    -e "s|__BOOKS_PROXY_PORT__|${BOOKS_PROXY_PORT}|g" \
+    -e "s|__CALIBRE_PORT__|${CALIBRE_PORT}|g" \
+    "${src}" > "${tmp}"
+  install -m 0644 "${tmp}" "${dest}"
+  rm -f "${tmp}"
+}
+
+install_wrappers() {
+  install -d -m 0755 "${OPT_BIN}"
+  install -m 0755 "${ROOT_DIR}/bin/books-annas" "${OPT_BIN}/books-annas"
+  install -m 0755 "${ROOT_DIR}/bin/books-import" "${OPT_BIN}/books-import"
+}
+
+install_services() {
+  install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre.service" "${SYSTEMD_UNIT}"
+  render_template "${ROOT_DIR}/config/nginx/books.conf.template" "${NGINX_CONF}"
+  if [[ -L /etc/nginx/sites-enabled/default ]]; then
+    rm -f /etc/nginx/sites-enabled/default
+  fi
+  systemctl daemon-reload
+  nginx -t
+  if [[ "${skip_start}" != true ]]; then
+    systemctl enable --now books-calibre
+    systemctl enable --now nginx
+    systemctl reload nginx
+  fi
+}
+
+install_skill() {
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    runuser -u "${SUDO_USER}" -- "${ROOT_DIR}/scripts/install-skill" || true
+  fi
+}
+
+load_existing_env
+
+ask BOOKS_PUBLIC_HOST "Public host" "${BOOKS_PUBLIC_HOST:-books.exe.xyz}"
+ask BOOKS_ALLOWED_EMAIL "Allowed exe.dev email for browser UI" "${BOOKS_ALLOWED_EMAIL:-neil.skaria@gmail.com}"
+ask BOOKS_PROXY_PORT "Local nginx proxy port" "${BOOKS_PROXY_PORT:-8000}"
+ask BOOKS_DATA_DIR "Data directory" "${BOOKS_DATA_DIR:-/srv/books}"
+
+BOOKS_LIBRARY_DIR="${BOOKS_LIBRARY_DIR:-${BOOKS_DATA_DIR}/library}"
+BOOKS_DOWNLOAD_DIR="${BOOKS_DOWNLOAD_DIR:-${BOOKS_DATA_DIR}/downloads}"
+BOOKS_IMPORT_DIR="${BOOKS_IMPORT_DIR:-${BOOKS_DATA_DIR}/import}"
+BOOKS_LOG_DIR="${BOOKS_LOG_DIR:-${BOOKS_DATA_DIR}/log}"
+BOOKS_CONFIG_DIR="${BOOKS_CONFIG_DIR:-${BOOKS_DATA_DIR}/config}"
+BOOKS_USERDB="${BOOKS_USERDB:-${BOOKS_CONFIG_DIR}/users.sqlite}"
+BOOKS_CALIBRE_LIBRARY_ID="${BOOKS_CALIBRE_LIBRARY_ID:-library}"
+
+ask CALIBRE_PORT "Calibre localhost port" "${CALIBRE_PORT:-8080}"
+ask CALIBRE_VERSION "Calibre version" "${CALIBRE_VERSION:-9.9.0}"
+ask CALIBRE_ADMIN_USER "Calibre admin user" "${CALIBRE_ADMIN_USER:-neil}"
+ask_secret CALIBRE_ADMIN_PASSWORD "Calibre admin password" "${CALIBRE_ADMIN_PASSWORD:-}"
+ask CALIBRE_OPDS_USER "Crosspoint/OPDS user" "${CALIBRE_OPDS_USER:-crosspoint}"
+ask_secret CALIBRE_OPDS_PASSWORD "Crosspoint/OPDS password" "${CALIBRE_OPDS_PASSWORD:-}"
+ask ANNAS_VERSION "Anna's Archive MCP version" "${ANNAS_VERSION:-v0.0.5}"
+ask ANNAS_BASE_URL "Anna's Archive mirror host" "${ANNAS_BASE_URL:-annas-archive.li}"
+ask_optional_secret ANNAS_SECRET_KEY "Anna's Archive API key" "${ANNAS_SECRET_KEY:-}"
+
+ANNAS_DOWNLOAD_PATH="${ANNAS_DOWNLOAD_PATH:-${BOOKS_DOWNLOAD_DIR}}"
+BOOKS_DEFAULT_LANGUAGE="${BOOKS_DEFAULT_LANGUAGE:-eng}"
+BOOKS_DEFAULT_TAGS="${BOOKS_DEFAULT_TAGS:-agent-imported}"
+
+write_env
+ensure_packages
+ensure_calibre
+ensure_users_and_dirs
+ensure_annas_mcp
+install_wrappers
+ensure_calibre_userdb
+install_services
+install_skill
+
+echo "Books service configured."
+echo "Local health: http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz"
+echo "OPDS URL for Crosspoint: https://${BOOKS_PUBLIC_HOST}/opds"
+echo "Run ./scripts/books proxy-commands for the documented exe.dev share commands."

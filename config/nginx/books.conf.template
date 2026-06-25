@@ -1,0 +1,70 @@
+map $http_x_forwarded_proto $books_forwarded_proto {
+    default $http_x_forwarded_proto;
+    "" $scheme;
+}
+
+map $http_x_forwarded_host $books_forwarded_host {
+    default $http_x_forwarded_host;
+    "" $host;
+}
+
+map $http_x_exedev_email $books_has_exedev_user {
+    default 1;
+    "" 0;
+}
+
+map $http_x_exedev_email $books_exedev_owner {
+    default 0;
+    "__BOOKS_ALLOWED_EMAIL__" 1;
+}
+
+upstream books_calibre {
+    server 127.0.0.1:__CALIBRE_PORT__;
+    keepalive 16;
+}
+
+server {
+    listen __BOOKS_PROXY_PORT__;
+    server_name _;
+
+    client_max_body_size 256M;
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Host $books_forwarded_host;
+    proxy_set_header X-Forwarded-Proto $books_forwarded_proto;
+    proxy_buffering off;
+
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Crosspoint/OPDS clients can authenticate directly to calibre with Basic auth.
+    location ^~ /opds {
+        proxy_pass http://books_calibre;
+    }
+
+    # Calibre OPDS acquisition, cover, and thumbnail links use /get/...
+    location ^~ /get/ {
+        proxy_pass http://books_calibre;
+    }
+
+    location = /favicon.png {
+        proxy_pass http://books_calibre;
+    }
+
+    # Browser UI requires exe.dev auth for the owner email before calibre sees it.
+    location / {
+        if ($books_has_exedev_user = 0) {
+            return 302 https://$http_host/__exe.dev/login?redirect=$request_uri;
+        }
+        if ($books_exedev_owner = 0) {
+            return 403;
+        }
+        proxy_pass http://books_calibre;
+    }
+}

@@ -1,0 +1,19 @@
+# Runtime data and secrets
+.env
+*.env
+secrets/
+runtime/
+downloads/
+import/
+library/
+*.sqlite
+*.sqlite-*
+
+# OS/editor noise
+.DS_Store
+*.swp
+*.tmp
+
+# Python/cache noise
+__pycache__/
+.pytest_cache/
