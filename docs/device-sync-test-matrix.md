@@ -9,8 +9,8 @@ Tester:
 
 The core architecture passes only if CrossPoint, KOReader, and Readest can all
 use the same self-hosted KOSync endpoint for progress on the same EPUB identity.
-Readest should get books from OPDS and progress from KOSync. WebDAV is outside
-the core pass/fail standard.
+Readest Web and the Readest apps should get books from OPDS and progress from
+KOSync. WebDAV is outside the core pass/fail standard.
 
 ## Fixture Books
 
@@ -26,7 +26,8 @@ Use legally owned, public-domain, Creative Commons, or otherwise authorized EPUB
 
 | Component | Version/tag/digest | Data path | Public path | Notes |
 |---|---|---|---|---|
-| Calibre |  | `/srv/books/library` | `/opds` | Source of truth for EPUB bytes |
+| Calibre |  | `/srv/books/library` | `/catalog` and `/opds` | Source of truth for EPUB bytes |
+| Readest Web |  | `/srv/books/readest` | `/library` | Browser reader; progress still goes through KOSync |
 | Official KOSync |  | `/srv/books/kosync` | `/kosync` | Core progress lane |
 | BookOrbit pilot |  |  |  | Copied fixtures only |
 | Komga pilot |  |  |  | Copied fixtures only |
@@ -52,12 +53,13 @@ Pass only if downloaded EPUB bytes match the canonical fixture. If a client rewr
 
 | Device/app | Catalog URL | Auth type | Download works | Raw SHA256 matches | Partial MD5 matches | Notes |
 |---|---|---|---|---|---|---|
-| CrossPoint | `https://books.exe.xyz/opds` | Basic |  |  |  |  |
-| KOReader | `https://books.exe.xyz/opds` | Basic |  |  |  |  |
-| Readest Android | `https://books.exe.xyz/opds` | Basic |  |  |  |  |
-| Readest iPad | `https://books.exe.xyz/opds` | Basic |  |  |  |  |
-| Readest macOS | `https://books.exe.xyz/opds` | Basic |  |  |  |  |
-| Readest Windows | `https://books.exe.xyz/opds` | Basic |  |  |  |  |
+| CrossPoint | `https://books.exe.xyz/catalog` | Basic |  |  |  |  |
+| KOReader | `https://books.exe.xyz/catalog` | Basic |  |  |  |  |
+| Readest Web | `https://books.exe.xyz/catalog` | Basic |  |  |  |  |
+| Readest Android | `https://books.exe.xyz/catalog` | Basic |  |  |  |  |
+| Readest iPad | `https://books.exe.xyz/catalog` | Basic |  |  |  |  |
+| Readest macOS | `https://books.exe.xyz/catalog` | Basic |  |  |  |  |
+| Readest Windows | `https://books.exe.xyz/catalog` | Basic |  |  |  |  |
 
 ## OPDS Failure Cases
 
@@ -94,6 +96,7 @@ Pass only if downloaded EPUB bytes match the canonical fixture. If a client rewr
 | CrossPoint | `https://books.exe.xyz/kosync` | per-reader user | Binary/file content if available | Auth works |
 | KOReader | `https://books.exe.xyz/kosync` | per-reader user | Binary | Auth works |
 | Readest | `https://books.exe.xyz/kosync` | per-reader user | File Content | Auth works |
+| Readest Web | `https://books.exe.xyz/kosync` | per-reader user | File Content | Auth works through `/api/kosync` bridge |
 
 ## KOSync Account Lifecycle
 
@@ -115,7 +118,8 @@ Readest passes only if a normal user can configure these without owner access.
 
 | Integration | In-app form | Per-user credential | Required setting | Pass | Notes |
 |---|---|---|---|---|---|
-| OPDS Catalogs | OPDS Catalogs | OPDS user/pass | Calibre catalog opens and downloads EPUB |  |  |
+| Readest login | Sign in | Readest email/pass | User can reach `/library` and sign in |  |  |
+| OPDS Catalogs | OPDS Catalogs | OPDS user/pass | Calibre catalog opens and downloads EPUB from `/catalog` |  |  |
 | KOReader Sync | KOReader Sync | KOSync user/pass | Strategy chosen for progress lane; checksum File Content |  |  |
 
 ## Family Account Lifecycle
@@ -124,10 +128,10 @@ Use this section before enabling family access. It validates `docs/research/fami
 
 | Test | Expected | Pass | Notes |
 |---|---|---|---|
-| Create user | OPDS and KOSync credentials are created for only that user |  |  |
-| Reconcile users | Derived Calibre/nginx/KOSync/setup state is rebuilt without rotating passwords |  |  |
+| Create user | Readest, OPDS, and KOSync credentials are created for only that user |  |  |
+| Reconcile users | Derived Calibre/Readest/KOSync/setup state is rebuilt without rotating passwords |  |  |
 | Rotate one user's KOSync password | New password works, old password fails, other users unaffected |  |  |
-| Disable user | OPDS, KOSync, setup page, and upload access fail for that user |  |  |
+| Disable user | Readest, OPDS, KOSync, setup page, and upload access fail for that user |  |  |
 | Purge user | User state is removed or archived without touching shared Calibre books |  |  |
 | Setup page privacy | User sees only their own credentials; owner/admin credentials never appear |  |  |
 | Setup page caching | Credential pages send no-store/no-referrer headers and no secrets in URLs |  |  |
@@ -153,6 +157,8 @@ Landing precision choices: `same paragraph`, `same page`, `within 1-3 pages`, `c
 | KOReader Desktop | Readest macOS |  |  |  |  |  |
 | Readest macOS | KOReader Desktop |  |  |  |  |  |
 | Readest Windows | Readest iPad via KOSync |  |  |  |  | Progress only |
+| Readest Web | Readest iPad via KOSync |  |  |  |  | Progress only |
+| Readest Web | KOReader Desktop |  |  |  |  | Progress only |
 | Readest Android | Readest Windows via KOSync |  |  |  |  | Progress only |
 | Kobo KOReader | CrossPoint |  |  |  |  | Optional |
 | CrossPoint | Kobo KOReader |  |  |  |  | Optional |

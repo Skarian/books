@@ -17,6 +17,7 @@ Use the repo helpers from `/home/exedev/books` rather than ad hoc commands:
 - Show Crosspoint setup values with `./scripts/books opds-url`.
 - Show KOSync setup values with `./scripts/books kosync-url`.
 - Show the owner-only Calibre-Web reader URL with `./scripts/books web-url`.
+- Use Readest Web at `/library`; progress sync still uses KOSync.
 - Manage family users with `./scripts/books users ...`.
 - Review web book requests with `./scripts/books requests ...`.
 - Show documented exe.dev proxy commands with `./scripts/books proxy-commands`.

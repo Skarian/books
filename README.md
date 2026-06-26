@@ -1,8 +1,9 @@
 # Books service
 
 Reproducible setup for Neil's self-hosted reading system on `books.exe.xyz`.
-The repo will stand up the shared Calibre bookshelf, cross-device progress sync,
-family users, and optional owner admin UI.
+The repo stands up the shared Calibre bookshelf, self-hosted Readest Web,
+cross-device KOSync progress, family users, and the owner admin surfaces needed
+to run it.
 
 The repo is the source of truth. Runtime data and secrets live outside git:
 
@@ -13,6 +14,7 @@ The repo is the source of truth. Runtime data and secrets live outside git:
 - `/srv/books/log`: service logs, not committed
 - `/srv/books/calibre-web`: Calibre-Web settings DB, not committed
 - `/srv/books/kosync`: KOSync state, not committed
+- `/srv/books/readest`: Readest Web, Supabase, and object storage state, not committed
 - `/srv/books/config/accounts.sqlite`: family users and generated service credentials, not committed
 - `/srv/books/requests`: per-user book request queue, not committed
 - `/srv/books/inbox`: staged family uploads, not committed
@@ -24,8 +26,10 @@ The repo is the source of truth. Runtime data and secrets live outside git:
 - `calibre-web` listens only on `127.0.0.1:8083` and provides the owner-only web UI/reader.
 - `books-portal` listens only on `127.0.0.1:8090` and provides the owner home page, user setup pages, and request queue.
 - `books-kosync` runs the pinned official KOReader Sync Server image and listens only on `127.0.0.1:7200`.
-- `/opds` and `/get/...` pass through to Calibre so Crosspoint can use Calibre Basic auth.
+- `books-readest` runs the pinned Readest Web stack. The browser app is on `/library`; its Supabase API is on `/auth/v1` and `/rest/v1`.
+- `/catalog`, `/opds`, and `/get/...` pass through to Calibre so CrossPoint, Readest, and KOReader can use Calibre Basic auth. Use `/catalog` in setup pages because Readest also has its own `/opds` browser route.
 - `/kosync` passes through to KOSync with prefix stripping.
+- `/api/kosync` is a local bridge for Readest Web. It forwards Readest's browser-side KOSync calls to the local KOSync service, because this VM cannot call its own public `books.exe.xyz` URL.
 - `/setup/<user>` reaches the portal and uses per-user Basic auth.
 - `/` is the owner portal and `/calibre/` is the owner Calibre-Web reader. Both require `X-ExeDev-Email: neil.skaria@gmail.com` from exe.dev.
 - Calibre-Web still uses its own username/password login.
@@ -57,12 +61,14 @@ The onboarding command installs:
 - official Calibre for Linux pinned by `CALIBRE_VERSION`
 - Calibre-Web pinned by `CALIBRE_WEB_VERSION`
 - official KOReader Sync Server pinned by `KOSYNC_IMAGE`
+- pinned Readest Web stack from `READEST_IMAGE`
 - Anna's Archive MCP/CLI `v0.0.5`
 - nginx config from `config/nginx/books.conf.template`
 - systemd unit from `config/systemd/books-calibre.service`
 - systemd unit from `config/systemd/books-calibre-web.service`
 - systemd unit from `config/systemd/books-portal.service`
 - systemd unit from `config/systemd/books-kosync.service`
+- systemd unit from `config/systemd/books-readest.service`
 - wrappers in `/opt/books/bin`
 - the repo-local Codex `$books` skill symlink
 
@@ -87,13 +93,27 @@ Return to private mode with:
 ssh exe.dev share set-private books
 ```
 
-The public OPDS URL for Crosspoint is:
+The public catalog URL for setup pages and normal app setup is:
 
 ```text
-https://books.exe.xyz/opds
+https://books.exe.xyz/catalog
 ```
 
-Use the `CALIBRE_OPDS_USER` and `CALIBRE_OPDS_PASSWORD` stored in `/etc/books/books.env`.
+The legacy OPDS route still exists at `https://books.exe.xyz/opds` for apps that
+expect it. User-specific OPDS credentials come from
+`./scripts/books users show USER`.
+
+The Readest Web URL is:
+
+```text
+https://books.exe.xyz/library
+```
+
+Readest progress sync still uses KOSync:
+
+```text
+https://books.exe.xyz/kosync
+```
 
 The owner-only web reader is:
 
@@ -149,4 +169,6 @@ Only use acquisition tools for books you are legally permitted to access, such a
 - Calibre content server: https://manual.calibre-ebook.com/server.html
 - `calibre-server` CLI: https://manual.calibre-ebook.com/generated/en/calibre-server.html
 - Calibre-Web: https://github.com/janeczku/calibre-web
+- Readest: https://github.com/readest/readest
+- KOReader Sync Server: https://github.com/koreader/koreader-sync-server
 - Anna's Archive MCP/CLI: https://github.com/iosifache/annas-mcp

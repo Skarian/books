@@ -1,0 +1,150 @@
+name: books-readest
+
+services:
+  db:
+    container_name: books-readest-db
+    image: ${READEST_POSTGRES_IMAGE}
+    restart: unless-stopped
+    volumes:
+      - ./volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
+      - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro
+      - ./volumes/db/init/schema.sql:/docker-entrypoint-initdb.d/init-scripts/100-schema.sql:ro
+      - db-data:/var/lib/postgresql/data
+      - db-config:/etc/postgresql-custom
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: ${READEST_POSTGRES_PORT}
+      POSTGRES_PORT: ${READEST_POSTGRES_PORT}
+      PGPASSWORD: ${READEST_POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${READEST_POSTGRES_PASSWORD}
+      PGDATABASE: ${READEST_POSTGRES_DB}
+      POSTGRES_DB: ${READEST_POSTGRES_DB}
+      JWT_SECRET: ${READEST_JWT_SECRET}
+      JWT_EXP: ${READEST_JWT_EXPIRY}
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal
+
+  kong:
+    container_name: books-readest-kong
+    image: ${READEST_KONG_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${READEST_KONG_PORT}:8000/tcp"
+    volumes:
+      - ./volumes/api/kong.yml:/home/kong/temp.yml:ro
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+      SUPABASE_ANON_KEY: ${READEST_ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${READEST_SERVICE_ROLE_KEY}
+    entrypoint: bash -c 'eval "echo \"$$(cat ~/temp.yml)\"" > ~/kong.yml && /docker-entrypoint.sh kong docker-start'
+
+  auth:
+    container_name: books-readest-auth
+    image: ${READEST_GOTRUE_IMAGE}
+    restart: unless-stopped
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: https://${BOOKS_PUBLIC_HOST}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${READEST_POSTGRES_PASSWORD}@db:${READEST_POSTGRES_PORT}/${READEST_POSTGRES_DB}
+      GOTRUE_SITE_URL: https://${BOOKS_PUBLIC_HOST}
+      GOTRUE_URI_ALLOW_LIST: https://${BOOKS_PUBLIC_HOST}/**,http://127.0.0.1:${BOOKS_PROXY_PORT}/**
+      GOTRUE_DISABLE_SIGNUP: ${READEST_DISABLE_SIGNUP}
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${READEST_JWT_EXPIRY}
+      GOTRUE_JWT_SECRET: ${READEST_JWT_SECRET}
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${READEST_ENABLE_EMAIL_SIGNUP}
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${READEST_ENABLE_ANONYMOUS_USERS}
+      GOTRUE_MAILER_AUTOCONFIRM: ${READEST_ENABLE_EMAIL_AUTOCONFIRM}
+      GOTRUE_SMTP_HOST: ${READEST_SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${READEST_SMTP_PORT}
+      GOTRUE_SMTP_USER: ${READEST_SMTP_USER}
+      GOTRUE_SMTP_PASS: ${READEST_SMTP_PASS}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${READEST_SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_SENDER_NAME: ${READEST_SMTP_SENDER_NAME}
+
+  rest:
+    container_name: books-readest-rest
+    image: ${READEST_POSTGREST_IMAGE}
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${READEST_POSTGRES_PASSWORD}@db:${READEST_POSTGRES_PORT}/${READEST_POSTGRES_DB}
+      PGRST_DB_SCHEMAS: public,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${READEST_JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${READEST_JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${READEST_JWT_EXPIRY}
+    command: ["postgrest"]
+
+  minio:
+    container_name: books-readest-minio
+    image: ${READEST_MINIO_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${READEST_MINIO_PORT}:9000"
+      - "127.0.0.1:${READEST_MINIO_CONSOLE_PORT}:9001"
+    environment:
+      MINIO_ROOT_USER: ${READEST_MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${READEST_MINIO_ROOT_PASSWORD}
+    command: server --console-address ":9001" /data
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-setup:
+    container_name: books-readest-minio-setup
+    image: ${READEST_MC_IMAGE}
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 ${READEST_MINIO_ROOT_USER} ${READEST_MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing myminio/${READEST_S3_BUCKET_NAME}
+      "
+
+  client:
+    container_name: books-readest-client
+    image: ${READEST_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${READEST_PORT}:3000"
+    environment:
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: https://${BOOKS_PUBLIC_HOST}
+      SUPABASE_ANON_KEY: ${READEST_ANON_KEY}
+      SUPABASE_ADMIN_KEY: ${READEST_SERVICE_ROLE_KEY}
+      API_BASE_URL: https://${BOOKS_PUBLIC_HOST}
+      SITE_URL: https://${BOOKS_PUBLIC_HOST}
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: https://${BOOKS_PUBLIC_HOST}/readest-files
+      S3_REGION: us-east-1
+      S3_BUCKET_NAME: ${READEST_S3_BUCKET_NAME}
+      S3_ACCESS_KEY_ID: ${READEST_MINIO_ROOT_USER}
+      S3_SECRET_ACCESS_KEY: ${READEST_MINIO_ROOT_PASSWORD}
+      OBJECT_STORAGE_TYPE: s3
+      STORAGE_FIXED_QUOTA: ${READEST_STORAGE_FIXED_QUOTA}
+      TRANSLATION_FIXED_QUOTA: ${READEST_TRANSLATION_FIXED_QUOTA}
+    depends_on:
+      - kong
+      - minio
+
+volumes:
+  db-config:
+  db-data:
+  minio-data:

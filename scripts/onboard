@@ -11,6 +11,7 @@ SYSTEMD_UNIT=/etc/systemd/system/books-calibre.service
 CALIBRE_WEB_SYSTEMD_UNIT=/etc/systemd/system/books-calibre-web.service
 PORTAL_SYSTEMD_UNIT=/etc/systemd/system/books-portal.service
 KOSYNC_SYSTEMD_UNIT=/etc/systemd/system/books-kosync.service
+READEST_SYSTEMD_UNIT=/etc/systemd/system/books-readest.service
 ORIGINAL_ARGS=("$@")
 
 if [[ ${EUID} -ne 0 ]]; then
@@ -63,9 +64,34 @@ load_existing_env() {
 }
 
 rand_secret() {
+  local length="${1:-24}"
   local value
-  value="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true)"
+  value="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${length}" || true)"
   printf '%s' "${value}"
+}
+
+jwt_for_role() {
+  local role="$1"
+  local secret="$2"
+  python3 - "$role" "$secret" <<'PY'
+import base64
+import hashlib
+import hmac
+import json
+import sys
+
+role, secret = sys.argv[1], sys.argv[2].encode()
+
+def b64url(raw):
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+header = {"alg": "HS256", "typ": "JWT"}
+payload = {"role": role}
+head = b64url(json.dumps(header, separators=(",", ":")).encode())
+body = b64url(json.dumps(payload, separators=(",", ":")).encode())
+sig = b64url(hmac.new(secret, f"{head}.{body}".encode(), hashlib.sha256).digest())
+print(f"{head}.{body}.{sig}")
+PY
 }
 
 ask() {
@@ -185,6 +211,40 @@ write_env() {
     printf 'KOSYNC_DATA_DIR=%s\n' "$(shell_quote "${KOSYNC_DATA_DIR}")"
     printf 'KOSYNC_LOG_DIR=%s\n' "$(shell_quote "${KOSYNC_LOG_DIR}")"
     printf 'KOSYNC_ENABLE_REGISTRATION=%s\n' "$(shell_quote "${KOSYNC_ENABLE_REGISTRATION}")"
+    printf 'READEST_PORT=%s\n' "$(shell_quote "${READEST_PORT}")"
+    printf 'READEST_KONG_PORT=%s\n' "$(shell_quote "${READEST_KONG_PORT}")"
+    printf 'READEST_MINIO_PORT=%s\n' "$(shell_quote "${READEST_MINIO_PORT}")"
+    printf 'READEST_MINIO_CONSOLE_PORT=%s\n' "$(shell_quote "${READEST_MINIO_CONSOLE_PORT}")"
+    printf 'READEST_DIR=%s\n' "$(shell_quote "${READEST_DIR}")"
+    printf 'READEST_IMAGE=%s\n' "$(shell_quote "${READEST_IMAGE}")"
+    printf 'READEST_POSTGRES_IMAGE=%s\n' "$(shell_quote "${READEST_POSTGRES_IMAGE}")"
+    printf 'READEST_KONG_IMAGE=%s\n' "$(shell_quote "${READEST_KONG_IMAGE}")"
+    printf 'READEST_GOTRUE_IMAGE=%s\n' "$(shell_quote "${READEST_GOTRUE_IMAGE}")"
+    printf 'READEST_POSTGREST_IMAGE=%s\n' "$(shell_quote "${READEST_POSTGREST_IMAGE}")"
+    printf 'READEST_MINIO_IMAGE=%s\n' "$(shell_quote "${READEST_MINIO_IMAGE}")"
+    printf 'READEST_MC_IMAGE=%s\n' "$(shell_quote "${READEST_MC_IMAGE}")"
+    printf 'READEST_POSTGRES_PASSWORD=%s\n' "$(shell_quote "${READEST_POSTGRES_PASSWORD}")"
+    printf 'READEST_POSTGRES_PORT=%s\n' "$(shell_quote "${READEST_POSTGRES_PORT}")"
+    printf 'READEST_POSTGRES_DB=%s\n' "$(shell_quote "${READEST_POSTGRES_DB}")"
+    printf 'READEST_JWT_EXPIRY=%s\n' "$(shell_quote "${READEST_JWT_EXPIRY}")"
+    printf 'READEST_JWT_SECRET=%s\n' "$(shell_quote "${READEST_JWT_SECRET}")"
+    printf 'READEST_ANON_KEY=%s\n' "$(shell_quote "${READEST_ANON_KEY}")"
+    printf 'READEST_SERVICE_ROLE_KEY=%s\n' "$(shell_quote "${READEST_SERVICE_ROLE_KEY}")"
+    printf 'READEST_DISABLE_SIGNUP=%s\n' "$(shell_quote "${READEST_DISABLE_SIGNUP}")"
+    printf 'READEST_ENABLE_EMAIL_SIGNUP=%s\n' "$(shell_quote "${READEST_ENABLE_EMAIL_SIGNUP}")"
+    printf 'READEST_ENABLE_EMAIL_AUTOCONFIRM=%s\n' "$(shell_quote "${READEST_ENABLE_EMAIL_AUTOCONFIRM}")"
+    printf 'READEST_ENABLE_ANONYMOUS_USERS=%s\n' "$(shell_quote "${READEST_ENABLE_ANONYMOUS_USERS}")"
+    printf 'READEST_SMTP_HOST=%s\n' "$(shell_quote "${READEST_SMTP_HOST}")"
+    printf 'READEST_SMTP_PORT=%s\n' "$(shell_quote "${READEST_SMTP_PORT}")"
+    printf 'READEST_SMTP_USER=%s\n' "$(shell_quote "${READEST_SMTP_USER}")"
+    printf 'READEST_SMTP_PASS=%s\n' "$(shell_quote "${READEST_SMTP_PASS}")"
+    printf 'READEST_SMTP_ADMIN_EMAIL=%s\n' "$(shell_quote "${READEST_SMTP_ADMIN_EMAIL}")"
+    printf 'READEST_SMTP_SENDER_NAME=%s\n' "$(shell_quote "${READEST_SMTP_SENDER_NAME}")"
+    printf 'READEST_MINIO_ROOT_USER=%s\n' "$(shell_quote "${READEST_MINIO_ROOT_USER}")"
+    printf 'READEST_MINIO_ROOT_PASSWORD=%s\n' "$(shell_quote "${READEST_MINIO_ROOT_PASSWORD}")"
+    printf 'READEST_S3_BUCKET_NAME=%s\n' "$(shell_quote "${READEST_S3_BUCKET_NAME}")"
+    printf 'READEST_STORAGE_FIXED_QUOTA=%s\n' "$(shell_quote "${READEST_STORAGE_FIXED_QUOTA}")"
+    printf 'READEST_TRANSLATION_FIXED_QUOTA=%s\n' "$(shell_quote "${READEST_TRANSLATION_FIXED_QUOTA}")"
     printf 'ANNAS_VERSION=%s\n' "$(shell_quote "${ANNAS_VERSION}")"
     printf 'ANNAS_BASE_URL=%s\n' "$(shell_quote "${ANNAS_BASE_URL}")"
     printf 'ANNAS_SECRET_KEY=%s\n' "$(shell_quote "${ANNAS_SECRET_KEY}")"
@@ -312,6 +372,7 @@ ensure_users_and_dirs() {
   install -d -o books -g books -m 0750 "${BOOKS_DATA_DIR}" "${BOOKS_CONFIG_DIR}" "${BOOKS_LOG_DIR}"
   install -d -o books -g books -m 0750 "${CALIBRE_WEB_DIR}"
   install -d -o books -g books -m 0750 "${KOSYNC_DATA_DIR}" "${KOSYNC_DATA_DIR}/redis" "${KOSYNC_LOG_DIR}" "${KOSYNC_LOG_DIR}/redis" "${KOSYNC_LOG_DIR}/app"
+  install -d -o books -g books -m 0750 "${READEST_DIR}" "${READEST_DIR}/volumes" "${READEST_DIR}/volumes/api" "${READEST_DIR}/volumes/db" "${READEST_DIR}/volumes/db/init"
   install -d -o books -g books -m 2770 "${BOOKS_LIBRARY_DIR}" "${BOOKS_DOWNLOAD_DIR}" "${BOOKS_IMPORT_DIR}" "${BOOKS_REQUESTS_DIR}"
   if [[ ! -f "${BOOKS_LIBRARY_DIR}/metadata.db" ]]; then
     runuser -u books -- calibredb --with-library "${BOOKS_LIBRARY_DIR}" list >/dev/null
@@ -442,6 +503,9 @@ render_template() {
     -e "s|__CALIBRE_WEB_PORT__|${CALIBRE_WEB_PORT}|g" \
     -e "s|__BOOKS_PORTAL_PORT__|${BOOKS_PORTAL_PORT}|g" \
     -e "s|__KOSYNC_PORT__|${KOSYNC_PORT}|g" \
+    -e "s|__READEST_PORT__|${READEST_PORT}|g" \
+    -e "s|__READEST_KONG_PORT__|${READEST_KONG_PORT}|g" \
+    -e "s|__READEST_MINIO_PORT__|${READEST_MINIO_PORT}|g" \
     "${src}" > "${tmp}"
   install -m 0644 "${tmp}" "${dest}"
   rm -f "${tmp}"
@@ -460,11 +524,29 @@ ensure_kosync_image() {
   docker pull "${KOSYNC_IMAGE}"
 }
 
+install_readest_stack() {
+  install -d -o books -g books -m 0750 "${READEST_DIR}"
+  install -m 0644 "${ROOT_DIR}/config/readest/compose.yaml.template" "${READEST_DIR}/compose.yaml"
+  cp -a "${ROOT_DIR}/config/readest/volumes/." "${READEST_DIR}/volumes/"
+  chown -R books:books "${READEST_DIR}/volumes"
+  find "${READEST_DIR}/volumes" -type d -exec chmod 0755 {} +
+  find "${READEST_DIR}/volumes" -type f -exec chmod 0644 {} +
+  install -m 0640 -o root -g books "${ENV_FILE}" "${READEST_DIR}/.env"
+  docker pull "${READEST_IMAGE}"
+  docker pull "${READEST_POSTGRES_IMAGE}"
+  docker pull "${READEST_KONG_IMAGE}"
+  docker pull "${READEST_GOTRUE_IMAGE}"
+  docker pull "${READEST_POSTGREST_IMAGE}"
+  docker pull "${READEST_MINIO_IMAGE}"
+  docker pull "${READEST_MC_IMAGE}"
+}
+
 install_services() {
   install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre.service" "${SYSTEMD_UNIT}"
   install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre-web.service" "${CALIBRE_WEB_SYSTEMD_UNIT}"
   install -m 0644 "${ROOT_DIR}/config/systemd/books-portal.service" "${PORTAL_SYSTEMD_UNIT}"
   install -m 0644 "${ROOT_DIR}/config/systemd/books-kosync.service" "${KOSYNC_SYSTEMD_UNIT}"
+  install -m 0644 "${ROOT_DIR}/config/systemd/books-readest.service" "${READEST_SYSTEMD_UNIT}"
   render_template "${ROOT_DIR}/config/nginx/books.conf.template" "${NGINX_CONF}"
   if [[ -L /etc/nginx/sites-enabled/default ]]; then
     rm -f /etc/nginx/sites-enabled/default
@@ -472,11 +554,12 @@ install_services() {
   systemctl daemon-reload
   nginx -t
   if [[ "${skip_start}" != true ]]; then
-    systemctl enable books-calibre books-calibre-web books-portal books-kosync nginx
+    systemctl enable books-calibre books-calibre-web books-portal books-kosync books-readest nginx
     systemctl restart books-calibre
     systemctl restart books-calibre-web
     systemctl restart books-portal
     systemctl restart books-kosync
+    systemctl restart books-readest
     systemctl enable --now nginx
     systemctl reload nginx
   fi
@@ -537,6 +620,40 @@ KOSYNC_CONTAINER="${KOSYNC_CONTAINER:-books-kosync}"
 KOSYNC_DATA_DIR="${KOSYNC_DATA_DIR:-${BOOKS_DATA_DIR}/kosync}"
 KOSYNC_LOG_DIR="${KOSYNC_LOG_DIR:-${BOOKS_LOG_DIR}/kosync}"
 KOSYNC_ENABLE_REGISTRATION="${KOSYNC_ENABLE_REGISTRATION:-false}"
+READEST_PORT="${READEST_PORT:-3000}"
+READEST_KONG_PORT="${READEST_KONG_PORT:-8001}"
+READEST_MINIO_PORT="${READEST_MINIO_PORT:-9100}"
+READEST_MINIO_CONSOLE_PORT="${READEST_MINIO_CONSOLE_PORT:-9101}"
+READEST_DIR="${READEST_DIR:-${BOOKS_DATA_DIR}/readest}"
+READEST_IMAGE="${READEST_IMAGE:-ghcr.io/readest/readest@sha256:d9423a58bf3e225ae399903f6cc5739e6ab608cb12283c7137207b7f4b3353a9}"
+READEST_POSTGRES_IMAGE="${READEST_POSTGRES_IMAGE:-supabase/postgres@sha256:af083ef64d0408c8f098ee6f5c364a59b26f36fbc0f3a334a62c5c1d57362e9b}"
+READEST_KONG_IMAGE="${READEST_KONG_IMAGE:-kong@sha256:1b53405d8680a09d6f44494b7990bf7da2ea43f84a258c59717d4539abf09f6d}"
+READEST_GOTRUE_IMAGE="${READEST_GOTRUE_IMAGE:-supabase/gotrue@sha256:de22ff0811f3e4f7e6d3ba226f75ed8d82310df577bbd61e16fbfd7a50a8c9ce}"
+READEST_POSTGREST_IMAGE="${READEST_POSTGREST_IMAGE:-postgrest/postgrest@sha256:7c5840727ad683b0fdbfb9810930665b34f8b44884a4dc740aa8844748a2b85e}"
+READEST_MINIO_IMAGE="${READEST_MINIO_IMAGE:-minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}"
+READEST_MC_IMAGE="${READEST_MC_IMAGE:-minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727}"
+READEST_POSTGRES_PASSWORD="${READEST_POSTGRES_PASSWORD:-$(rand_secret 40)}"
+READEST_POSTGRES_PORT="${READEST_POSTGRES_PORT:-5432}"
+READEST_POSTGRES_DB="${READEST_POSTGRES_DB:-postgres}"
+READEST_JWT_EXPIRY="${READEST_JWT_EXPIRY:-3600}"
+READEST_JWT_SECRET="${READEST_JWT_SECRET:-$(rand_secret 48)}"
+READEST_ANON_KEY="${READEST_ANON_KEY:-$(jwt_for_role anon "${READEST_JWT_SECRET}")}"
+READEST_SERVICE_ROLE_KEY="${READEST_SERVICE_ROLE_KEY:-$(jwt_for_role service_role "${READEST_JWT_SECRET}")}"
+READEST_DISABLE_SIGNUP="${READEST_DISABLE_SIGNUP:-false}"
+READEST_ENABLE_EMAIL_SIGNUP="${READEST_ENABLE_EMAIL_SIGNUP:-true}"
+READEST_ENABLE_EMAIL_AUTOCONFIRM="${READEST_ENABLE_EMAIL_AUTOCONFIRM:-true}"
+READEST_ENABLE_ANONYMOUS_USERS="${READEST_ENABLE_ANONYMOUS_USERS:-false}"
+READEST_SMTP_HOST="${READEST_SMTP_HOST:-}"
+READEST_SMTP_PORT="${READEST_SMTP_PORT:-587}"
+READEST_SMTP_USER="${READEST_SMTP_USER:-}"
+READEST_SMTP_PASS="${READEST_SMTP_PASS:-}"
+READEST_SMTP_ADMIN_EMAIL="${READEST_SMTP_ADMIN_EMAIL:-${BOOKS_ALLOWED_EMAIL}}"
+READEST_SMTP_SENDER_NAME="${READEST_SMTP_SENDER_NAME:-Readest}"
+READEST_MINIO_ROOT_USER="${READEST_MINIO_ROOT_USER:-readest}"
+READEST_MINIO_ROOT_PASSWORD="${READEST_MINIO_ROOT_PASSWORD:-$(rand_secret 40)}"
+READEST_S3_BUCKET_NAME="${READEST_S3_BUCKET_NAME:-readest-files}"
+READEST_STORAGE_FIXED_QUOTA="${READEST_STORAGE_FIXED_QUOTA:-1073741824}"
+READEST_TRANSLATION_FIXED_QUOTA="${READEST_TRANSLATION_FIXED_QUOTA:-50000}"
 
 write_env
 ensure_packages
@@ -547,6 +664,7 @@ ensure_env_permissions
 ensure_annas_mcp
 install_wrappers
 ensure_kosync_image
+install_readest_stack
 ensure_calibre_userdb
 ensure_calibre_web_db
 /opt/books/bin/books-users init
@@ -558,6 +676,8 @@ echo "Books service configured."
 echo "Local health: http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz"
 echo "Books portal: https://${BOOKS_PUBLIC_HOST}/"
 echo "Calibre-Web URL: https://${BOOKS_PUBLIC_HOST}/calibre/"
+echo "Readest Web URL: https://${BOOKS_PUBLIC_HOST}/library"
 echo "OPDS URL for Crosspoint: https://${BOOKS_PUBLIC_HOST}/opds"
+echo "Catalog URL for setup pages: https://${BOOKS_PUBLIC_HOST}/catalog"
 echo "KOSync URL for progress: https://${BOOKS_PUBLIC_HOST}/kosync"
 echo "Run ./scripts/books proxy-commands for the documented exe.dev share commands."

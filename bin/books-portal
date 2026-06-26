@@ -4,9 +4,12 @@ import datetime as dt
 import html
 import json
 import os
+import re
 import sqlite3
+import ssl
 import sys
 import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -34,24 +37,30 @@ ALLOWED_EMAIL = ENV.get("BOOKS_ALLOWED_EMAIL", "neil.skaria@gmail.com")
 ACCOUNTS_DB = Path(ENV.get("BOOKS_ACCOUNTS_DB", "/srv/books/config/accounts.sqlite"))
 REQUESTS_DIR = Path(ENV.get("BOOKS_REQUESTS_DIR", "/srv/books/requests"))
 PORT = int(ENV.get("BOOKS_PORTAL_PORT", "8090"))
+KOSYNC_PORT = int(ENV.get("KOSYNC_PORT", "7200"))
 
 
 STYLE = """
-body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f2ec;color:#191815}
-a{color:#205c55;text-decoration:none}a:hover{text-decoration:underline}
+body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f6f4ef;color:#191815}
+a{color:#166157;text-decoration:none}a:hover{text-decoration:underline}
 .wrap{max-width:1120px;margin:0 auto;padding:28px}
 .top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:24px}
-.brand{font-size:28px;font-weight:720}.muted{color:#686158}.nav{display:flex;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+.brand{font-size:28px;font-weight:720;letter-spacing:0}.muted{color:#676058}.nav{display:flex;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+.hero{background:#fff;border:1px solid #ded8cf;border-radius:8px;padding:24px;margin-bottom:16px}.hero h1{margin:0 0 8px;font-size:32px;line-height:1.08}.hero p{max-width:760px;line-height:1.5}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:14px}.stack{display:grid;gap:14px}
 .card{background:#fff;border:1px solid #ded8cf;border-radius:8px;padding:18px;box-shadow:0 1px 2px #0000000f}
-.card h1,.card h2,.card h3{margin:0 0 8px}.card p{line-height:1.45}
+.card h1,.card h2,.card h3{margin:0 0 8px}.card p,.card li{line-height:1.45}.card ul{margin:10px 0 0;padding-left:20px}
 .button{display:inline-block;background:#1f5f55;color:#fff;padding:10px 14px;border-radius:6px;border:0;font-weight:650}.button:hover{text-decoration:none;background:#184c44}
+.secondary{background:#ece6dd;color:#1f3834}.secondary:hover{background:#e3dbcf;color:#1f3834}
 input,textarea{width:100%;box-sizing:border-box;border:1px solid #cbc4ba;border-radius:6px;padding:10px;background:#fff;font:inherit}
-label{display:block;font-weight:650;margin:12px 0 5px}.row{display:flex;gap:10px;flex-wrap:wrap}.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#f0ece5;padding:2px 5px;border-radius:4px;word-break:break-all}
+label{display:block;font-weight:650;margin:12px 0 5px}.row,.actions{display:flex;gap:10px;flex-wrap:wrap}.actions{margin-top:16px}
+.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#f0ece5;padding:2px 5px;border-radius:4px;word-break:break-all}
 pre.code{display:block;padding:10px;white-space:pre-wrap}.pill{display:inline-block;border:1px solid #d6cec2;background:#f7f3eb;border-radius:999px;padding:3px 8px;font-size:12px;color:#504941}
+.field{border:1px solid #e2dbd1;background:#fbfaf7;border-radius:8px;padding:10px;margin:8px 0}.field b{display:block;font-size:12px;color:#635b52;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em}.field span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+.steps{counter-reset:step}.step{position:relative;padding-left:48px}.step:before{counter-increment:step;content:counter(step);position:absolute;left:18px;top:18px;width:24px;height:24px;border-radius:50%;background:#1f5f55;color:#fff;display:grid;place-items:center;font-weight:700;font-size:13px}
 .ok{color:#1f5f55}.warn{color:#8a4d14}.bad{color:#9d1d20}
 table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #ded8cf}th,td{padding:10px;border-bottom:1px solid #eee8df;text-align:left;vertical-align:top}
-@media(max-width:720px){.top{display:block}.nav{justify-content:flex-start;margin-top:12px}.wrap{padding:18px}}
+@media(max-width:720px){.top{display:block}.nav{justify-content:flex-start;margin-top:12px}.wrap{padding:18px}.hero h1{font-size:27px}.step{padding-left:18px;padding-top:52px}.step:before{top:18px}}
 """
 
 
@@ -172,7 +181,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
-        if path.startswith("/setup/") and path.endswith("/request"):
+        if path == "/api/kosync":
+            self.readest_kosync_proxy()
+        elif path.startswith("/setup/") and path.endswith("/request"):
             slug = path.split("/")[2]
             row = self.setup_auth(slug)
             if not row:
@@ -194,6 +205,78 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_html("Not found", "<div class='card'><h1>Not found</h1></div>", 404)
 
+    def send_json(self, payload, code=200):
+        content = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(content)
+
+    def readest_kosync_proxy(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode())
+        except Exception:
+            self.send_json({"error": "Invalid JSON body"}, 400)
+            return
+
+        server_url = str(payload.get("serverUrl", "")).rstrip("/")
+        endpoint = str(payload.get("endpoint", ""))
+        method = str(payload.get("method", "GET")).upper()
+        headers = payload.get("headers") or {}
+        body = payload.get("body")
+
+        try:
+            parsed = urllib.parse.urlparse(server_url)
+        except Exception:
+            self.send_json({"error": "Invalid serverUrl"}, 400)
+            return
+
+        if parsed.scheme != "https" or parsed.netloc != PUBLIC_HOST or parsed.path.rstrip("/") != "/kosync":
+            self.send_json({"error": "This Readest instance only proxies its own KOSync server."}, 400)
+            return
+        if method not in {"GET", "POST", "PUT"}:
+            self.send_json({"error": "Invalid method"}, 400)
+            return
+        if not any(re.fullmatch(pattern, endpoint) for pattern in (r"/users/auth", r"/users/create", r"/syncs/progress", r"/syncs/progress/[^/]+")):
+            self.send_json({"error": "Invalid endpoint"}, 400)
+            return
+
+        target = f"https://127.0.0.1:{KOSYNC_PORT}{endpoint}"
+        outbound_headers = {
+            "Accept": "application/vnd.koreader.v1+json",
+            "Content-Type": "application/json",
+        }
+        for key, value in headers.items():
+            lk = str(key).lower()
+            if lk in {"x-auth-user", "x-auth-key", "authorization"}:
+                outbound_headers[str(key)] = str(value)
+        data = json.dumps(body).encode() if body is not None else None
+        request = urllib.request.Request(target, data=data, method=method, headers=outbound_headers)
+
+        try:
+            context = ssl._create_unverified_context()
+            with urllib.request.urlopen(request, context=context, timeout=15) as response:
+                content = response.read()
+                code = response.status
+                content_type = response.headers.get("Content-Type", "application/json")
+        except urllib.error.HTTPError as error:
+            content = error.read()
+            code = error.code
+            content_type = error.headers.get("Content-Type", "application/json")
+        except Exception as error:
+            self.send_json({"error": "Proxy request failed", "details": str(error)}, 502)
+            return
+
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(content)
+
     def chrome(self, title, inner):
         return f"<div class='top'><div><div class='brand'>Neil's Books</div><div class='muted'>{esc(title)}</div></div><nav class='nav'><a href='/'>Home</a><a href='/guide'>Guide</a><a href='/users'>Users</a><a href='/requests'>Requests</a><a href='/calibre/'>Calibre</a></nav></div>{inner}"
 
@@ -206,12 +289,11 @@ class Handler(BaseHTTPRequestHandler):
         requests = load_requests()
         open_requests = sum(1 for row in requests if row.get("status", "new") not in {"fulfilled", "done", "rejected"})
         body = f"""
-        <section class='card'><h1>Library cockpit</h1><p>This is the owner start page for the self-hosted reading setup. Books come from Calibre OPDS, reading position syncs through KOSync, and each person gets a private setup page.</p><div class='row'><span class='pill'>{users} active reader{"s" if users != 1 else ""}</span><span class='pill'>{open_requests} open request{"s" if open_requests != 1 else ""}</span><span class='pill'>KOSync on /kosync</span><span class='pill'>OPDS on /opds</span></div></section>
+        <section class='hero'><h1>Neil's Books</h1><p>A self-hosted EPUB library for the family. Readest handles browser and app reading, Calibre serves the catalog, and KOSync keeps reading position synced across devices.</p><div class='row'><span class='pill'>{users} active reader{"s" if users != 1 else ""}</span><span class='pill'>{open_requests} open request{"s" if open_requests != 1 else ""}</span><span class='pill'>Catalog on /catalog</span><span class='pill'>Progress sync on /kosync</span></div><div class='actions'><a class='button' href='/library'>Read in browser</a><a class='button secondary' href='/guide'>Set up a device</a></div></section>
         <div class='grid'>
-          <section class='card'><h2>Read</h2><p>Owner Calibre-Web reader and library UI.</p><a class='button' href='/calibre/'>Open Calibre</a></section>
-          <section class='card'><h2>Set up devices</h2><p>Readest, CrossPoint, KOReader, and the exact sync URLs.</p><a class='button' href='/guide'>Open Guide</a></section>
-          <section class='card'><h2>Family users</h2><p>Add readers by chatting with Codex or using the CLI, then share their setup page.</p><a class='button' href='/users'>View Users</a></section>
-          <section class='card'><h2>Book requests</h2><p>Requests submitted from setup pages for agent-assisted search, download, and import.</p><a class='button' href='/requests'>Review Requests</a></section>
+          <section class='card'><h2>Calibre admin</h2><p>Use this when you need metadata, imports, or the older Calibre-Web UI.</p><a class='button' href='/calibre/'>Open Calibre</a></section>
+          <section class='card'><h2>Family readers</h2><p>Add a reader, rotate credentials, or open their private setup page.</p><a class='button' href='/users'>View users</a></section>
+          <section class='card'><h2>Book requests</h2><p>Requests from setup pages wait here until an agent searches, downloads, and imports an authorized EPUB.</p><a class='button' href='/requests'>Review requests</a></section>
         </div>
         """
         self.send_html("Home", self.chrome("home", body))
@@ -220,12 +302,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self.require_owner():
             return
         body = f"""
-        <div class='stack'>
-        <section class='card'><h1>Device guide</h1><p>Use the per-user setup page for credentials. The shared values are stable:</p><p>OPDS catalog <span class='code'>https://{PUBLIC_HOST}/opds</span></p><p>KOSync server <span class='code'>https://{PUBLIC_HOST}/kosync</span></p></section>
-        <section class='card'><h2>Readest on Android, iPad, Mac, and Windows</h2><p>Add <b>OPDS Catalogs</b>, download the EPUB, then add <b>KOReader Sync</b>. Set checksum to <b>File Content</b>. Leave WebDAV off for now.</p><p>If Readest asks for a server URL, use exactly <span class='code'>https://{PUBLIC_HOST}/kosync</span>.</p></section>
-        <section class='card'><h2>XTEink X4 with CrossPoint</h2><p>Add the OPDS catalog, download the EPUB from this server, then configure KOReader-compatible progress sync with the same reader's KOSync account.</p></section>
-        <section class='card'><h2>KOReader</h2><p>Add the OPDS catalog and configure Progress Sync. Use binary matching. KOReader is the reference client for testing progress sync.</p></section>
-        <section class='card'><h2>Important</h2><p>Do not append <span class='code'>/api</span>, <span class='code'>/v1</span>, or <span class='code'>/healthcheck</span> to the KOSync URL. Do not copy random EPUB files between apps if progress matters; download the same EPUB from OPDS.</p></section>
+        <div class='stack steps'>
+        <section class='hero'><h1>Set up reading</h1><p>Each person has a private setup page with their own passwords. The URLs are shared, but the logins are not.</p><div class='grid'><div class='field'><b>Readest Web</b><span>https://{PUBLIC_HOST}/library</span></div><div class='field'><b>Book catalog</b><span>https://{PUBLIC_HOST}/catalog</span></div><div class='field'><b>Reading-place sync</b><span>https://{PUBLIC_HOST}/kosync</span></div></div></section>
+        <section class='card step'><h2>Readest on iPad, Android, Mac, and Windows</h2><ul><li>Sign in to Readest with the Readest email and password from the reader's setup page.</li><li>Add the OPDS catalog URL, then download books from there.</li><li>Turn on KOReader Sync in Readest and use the KOSync username and password.</li><li>If Readest asks how to match books, choose file content or binary matching.</li></ul></section>
+        <section class='card step'><h2>XTEink X4 with CrossPoint</h2><p>Add the book catalog URL and use the reader's OPDS login. If CrossPoint exposes KOReader-compatible progress sync, use the same KOSync server and that reader's KOSync login.</p></section>
+        <section class='card step'><h2>KOReader</h2><p>Add the catalog as an OPDS catalog and configure Progress Sync with the KOSync values. KOReader is the reference app for validating sync behavior.</p></section>
+        <section class='card step'><h2>What to avoid</h2><p>Use <span class='code'>https://{PUBLIC_HOST}/kosync</span> exactly. Do not add <span class='code'>/api</span>, <span class='code'>/v1</span>, or <span class='code'>/healthcheck</span>. For progress sync, download the same EPUB from this catalog on each device.</p></section>
         </div>
         """
         self.send_html("Guide", self.chrome("device setup", body))
@@ -236,11 +318,11 @@ class Handler(BaseHTTPRequestHandler):
         conn = db()
         rows = conn.execute("select * from accounts where status!='deleted' order by display_name").fetchall()
         conn.close()
-        table = "<table><tr><th>User</th><th>Status</th><th>Email</th><th>Setup page</th><th>Setup login</th><th>CLI</th></tr>"
+        table = "<table><tr><th>User</th><th>Status</th><th>Readest</th><th>Setup page</th><th>Setup login</th><th>CLI</th></tr>"
         for row in rows:
-            table += f"<tr><td>{esc(row['display_name'])}</td><td><span class='pill'>{esc(row['status'])}</span></td><td>{esc(row['email'])}</td><td><a href='/setup/{esc(row['slug'])}'>/setup/{esc(row['slug'])}</a></td><td><div class='code'>{esc(row['setup_user'])}</div><div class='code'>{esc(row['setup_password'])}</div></td><td><pre class='code'>./scripts/books users show {esc(row['slug'])}</pre><pre class='code'>./scripts/books users rotate {esc(row['slug'])} all</pre></td></tr>"
+            table += f"<tr><td>{esc(row['display_name'])}<br><span class='muted'>{esc(row['email'])}</span></td><td><span class='pill'>{esc(row['status'])}</span></td><td><div class='code'>{esc(row['readest_email'])}</div><div class='code'>{esc(row['readest_password'])}</div></td><td><a href='/setup/{esc(row['slug'])}'>/setup/{esc(row['slug'])}</a></td><td><div class='code'>{esc(row['setup_user'])}</div><div class='code'>{esc(row['setup_password'])}</div></td><td><pre class='code'>./scripts/books users show {esc(row['slug'])}</pre><pre class='code'>./scripts/books users rotate {esc(row['slug'])} all</pre><pre class='code'>./scripts/books users reconcile {esc(row['slug'])}</pre></td></tr>"
         table += "</table>"
-        body = f"<section class='card'><h1>Users</h1><p>Create users by asking Codex, or run <span class='code'>./scripts/books users create \"Name\" --email person@example.com</span>.</p>{table}</section>"
+        body = f"<section class='card'><h1>Family readers</h1><p>Create users by asking Codex, or run <span class='code'>./scripts/books users create \"Name\" --email person@example.com</span>. Reconcile pushes that account into Calibre OPDS, Readest, and KOSync.</p>{table}</section>"
         self.send_html("Users", self.chrome("family users", body))
 
     def requests(self):
@@ -267,11 +349,13 @@ class Handler(BaseHTTPRequestHandler):
         request_table = "<p class='muted'>No requests yet.</p>" if not rows else "<table><tr><th>Time</th><th>Book</th><th>Status</th><th>Note</th></tr>%s</table>" % "".join(rows)
         body = f"""
         <div class='top'><div><div class='brand'>Neil's Books for {esc(row['display_name'])}</div><div class='muted'>shared books, private reading place</div></div></div>
-        <div class='grid'>
-          <section class='card'><h2>1. Download books</h2><p>Use this OPDS catalog in Readest, CrossPoint, or KOReader.</p><p class='code'>https://{PUBLIC_HOST}/opds</p><p>Username <span class='code'>{esc(row['opds_user'])}</span></p><p>Password <span class='code'>{esc(row['opds_password'])}</span></p></section>
-          <section class='card'><h2>2. Sync your place</h2><p>Use this for KOReader Sync / Progress Sync.</p><p class='code'>https://{PUBLIC_HOST}/kosync</p><p>Username <span class='code'>{esc(row['kosync_user'])}</span></p><p>Password <span class='code'>{esc(row['kosync_password'])}</span></p><p>Readest: File Content. KOReader: Binary.</p></section>
-          <section class='card'><h2>3. Apps</h2><p><b>Readest</b>: Android, iPad, Mac, Windows.</p><p><b>CrossPoint</b>: XTEink X4.</p><p><b>KOReader</b>: any device where it feels better.</p><p>Leave WebDAV off.</p></section>
+        <section class='hero'><h1>Start here</h1><p>Readest is the easiest place to begin. Use the catalog for books and KOSync for your reading place. Keep these credentials private; they are just for you.</p><div class='actions'><a class='button' href='/library'>Read in browser</a></div></section>
+        <div class='grid steps'>
+          <section class='card step'><h2>Sign in to Readest</h2><p>Use this for Readest Web and the Readest apps.</p><div class='field'><b>URL</b><span>https://{PUBLIC_HOST}/library</span></div><div class='field'><b>Email</b><span>{esc(row['readest_email'])}</span></div><div class='field'><b>Password</b><span>{esc(row['readest_password'])}</span></div></section>
+          <section class='card step'><h2>Add the book catalog</h2><p>Use this OPDS catalog in Readest, CrossPoint, or KOReader.</p><div class='field'><b>Catalog URL</b><span>https://{PUBLIC_HOST}/catalog</span></div><div class='field'><b>Username</b><span>{esc(row['opds_user'])}</span></div><div class='field'><b>Password</b><span>{esc(row['opds_password'])}</span></div></section>
+          <section class='card step'><h2>Turn on progress sync</h2><p>In Readest, use KOReader Sync. In KOReader, use Progress Sync. This is what keeps your place across devices.</p><div class='field'><b>KOSync server</b><span>https://{PUBLIC_HOST}/kosync</span></div><div class='field'><b>Username</b><span>{esc(row['kosync_user'])}</span></div><div class='field'><b>Password</b><span>{esc(row['kosync_password'])}</span></div><p class='muted'>If the app asks how to match books, choose file content or binary matching.</p></section>
         </div>
+        <section class='card' style='margin-top:14px'><h2>Device notes</h2><p><b>iPad, Android, Mac, Windows:</b> use Readest first. <b>XTEink X4 with CrossPoint:</b> add the catalog and use KOSync if the sync settings are available. <b>KOReader:</b> catalog plus Progress Sync is the reference setup.</p><p class='muted'>Leave WebDAV off unless we add it later for a specific device problem.</p></section>
         <section class='card' style='margin-top:14px'><h2>Request a book</h2><form method='post' action='/setup/{esc(row['slug'])}/request'><label>Title / author</label><input name='title' required><label>Notes</label><textarea name='notes' rows='4'></textarea><label><input style='width:auto' type='checkbox' name='legal' value='yes' required> I own this, it is public domain, Creative Commons, or I am otherwise allowed to access it.</label><button class='button' type='submit'>Send request</button></form></section>
         <section class='card' style='margin-top:14px'><h2>Your requests</h2>{request_table}</section>
         """

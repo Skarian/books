@@ -8,13 +8,18 @@ reader behavior.
 
 ## Service shape
 
-The repo will stand up this public shape:
+The repo stands up this public shape:
 
 ```text
 https://books.exe.xyz
+  /library          -> self-hosted Readest Web reader
+  /catalog          -> shared Calibre bookshelf for setup and apps
   /opds             -> shared Calibre bookshelf
   /get/...          -> canonical EPUB downloads
   /kosync           -> progress sync
+  /api/kosync       -> Readest Web bridge to local KOSync
+  /auth/v1          -> Readest auth
+  /rest/v1          -> Readest data API
   /setup/<user>     -> per-user setup and book requests
   /calibre/         -> owner Calibre-Web
   /                 -> owner portal
@@ -23,6 +28,7 @@ https://books.exe.xyz
 The split matters:
 
 - Calibre owns the books.
+- Readest owns the browser/app reading session.
 - KOSync owns reading position.
 - The account helper owns the family workflow, not the library data itself.
 
@@ -34,11 +40,16 @@ debugging sane.
 Reader apps need routes they can reach without an exe.dev browser session:
 
 - `/opds`
+- `/catalog`
 - `/get/...`
 - `/kosync`
 
 Those routes authenticate with service credentials. OPDS uses Calibre Basic auth.
 KOSync uses KOSync credentials.
+
+Use `/catalog` in setup docs and user pages. `/opds` remains available for apps
+that expect that exact path, but Readest also owns a browser page at `/opds`.
+Nginx handles the overlap, and `/catalog` keeps the human setup path obvious.
 
 The public KOSync URL for clients is `https://books.exe.xyz/kosync`. Reader apps
 append KOSync API paths such as `/users/auth` and `/syncs/progress`, so nginx
@@ -66,8 +77,9 @@ credentials.
 |---|---|---|
 | Calibre | EPUB files, metadata, OPDS catalog, downloads | progress, highlights, family admin |
 | Calibre-Web | owner browser reader and owner library UI | public family admin, cross-device progress |
+| Readest Web | browser/app reader account, app library state | progress authority, canonical book files |
 | KOSync | per-user reading position for canonical EPUBs | book files, notes, highlights |
-| Account helper | users, credentials, setup pages, service reconciliation | direct service state outside the shared helper |
+| Account helper | users, Readest credentials, OPDS credentials, KOSync credentials, setup pages, service reconciliation | direct service state outside the shared helper |
 
 `scripts/books users ...` is the primary owner interface. Codex can use it
 through the `books` skill when Neil wants to add, disable, rotate, or inspect a
@@ -84,9 +96,12 @@ Official KOSync is last-write-wins. A later update can move progress backward.
 That is acceptable for one human moving between devices, but it is why each
 person needs a separate KOSync account.
 
-Readest gets books through OPDS and syncs position through KOReader Sync. That
-is the default path. It is simple enough for normal users, and it keeps Readest
-on the same canonical EPUB bytes as CrossPoint and KOReader.
+Readest gets books through OPDS and syncs position through KOReader Sync. That is
+the default path. The web reader lives at `/library`, but progress still goes
+through KOSync. The Readest Web app cannot call the public `books.exe.xyz`
+address from inside this VM, so nginx sends `/api/kosync` to the portal bridge,
+which forwards only this service's allowed KOSync calls to the local KOSync
+container.
 
 Current upstream Readest exposes these integrations separately:
 
@@ -125,6 +140,7 @@ Runtime state stays outside git:
 - `/srv/books/config`
 - `/srv/books/calibre-web`
 - `/srv/books/kosync`
+- `/srv/books/readest`
 - `/srv/books/inbox`
 
 Backups need the runtime paths. Git recreates the service, not the books or
@@ -156,11 +172,13 @@ Implemented now:
 - Anna's Archive MCP/CLI
 - OPDS and `/get/...`
 - KOSync
+- Readest Web
 - family account registry
 - `scripts/books users ...`
 - setup pages
 - book request queue
 - owner-only Calibre-Web
+- owner and family Readest accounts
 - import helpers
 - onboarding
 

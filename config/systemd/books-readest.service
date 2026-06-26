@@ -1,0 +1,17 @@
+[Unit]
+Description=Books Readest Web stack
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/srv/books/readest
+EnvironmentFile=/etc/books/books.env
+ExecStart=/usr/bin/docker compose --env-file /srv/books/readest/.env -f /srv/books/readest/compose.yaml up -d
+ExecStop=/usr/bin/docker compose --env-file /srv/books/readest/.env -f /srv/books/readest/compose.yaml down
+TimeoutStartSec=0
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
