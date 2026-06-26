@@ -5,6 +5,11 @@ Research date: June 26, 2026 UTC.
 This is the planning record behind the family-user docs. For the shorter working
 version, read `../family-users.md`.
 
+Update after the Readest source review: WebDAV is no longer part of the default
+family plan. The core path is OPDS for book downloads and KOSync for progress.
+WebDAV can be revisited later only if OPDS plus KOSync fails device testing, or
+if Readest-only notes/backups become a hard requirement.
+
 ## Verdict
 
 Family mode is viable, but the naive version is unsafe.
@@ -17,10 +22,11 @@ Use this user-facing model:
 
 - Read books: connect to the shared bookshelf and download the canonical EPUB from Calibre OPDS.
 - Sync my place: KOSync, progress only, one account per person.
-- Sync Readest notes and backup: WebDAV, Readest-only, one private root per person.
 - Upload a book: optional staged workflow, not direct library mutation.
 
-Books can be shared. Progress, highlights, notes, WebDAV files, setup secrets, and credentials must be per-user.
+Books can be shared. Progress, setup secrets, and credentials must be per-user.
+The first family version does not sync Readest highlights, notes, bookmarks,
+collections, ratings, or app backups.
 
 ## Account Source Of Truth
 
@@ -41,7 +47,6 @@ The registry should track:
 - roles: reader, uploader, owner
 - OPDS username
 - KOSync username
-- WebDAV username and private root
 - optional Calibre-Web username
 - credential version and last rotation time
 - created, disabled, deleted, and purged timestamps
@@ -57,17 +62,17 @@ Extend `scripts/books` with a user namespace:
 ./scripts/books users create NAME --email EMAIL [--upload]
 ./scripts/books users disable USER
 ./scripts/books users purge USER
-./scripts/books users rotate USER [opds|kosync|webdav|all]
+./scripts/books users rotate USER [opds|kosync|setup|all]
 ./scripts/books users reconcile
 ./scripts/books users show USER
 ```
 
 Rules:
 
-- `create` generates per-user OPDS, KOSync, and WebDAV credentials.
+- `create` generates per-user OPDS and KOSync credentials.
 - `disable` revokes access but preserves state.
 - `purge` is explicit and destructive, after backup confirmation.
-- `rotate` changes credentials without deleting user state.
+- `rotate` changes OPDS, KOSync, or setup-page credentials without deleting user state.
 - `reconcile` rebuilds all derived service state from the registry.
 - Re-running onboarding must call `users reconcile` and must not rotate passwords unless explicitly requested.
 
@@ -129,18 +134,13 @@ Suggested structure:
    - Readest matching: File Content
    - KOReader matching: Binary
    - CrossPoint matching: binary/file-content if the device UI exposes it
-5. Readest notes and backup
-   - WebDAV URL: per-user path under `https://books.exe.xyz/dav/readest/...`
-   - the user's WebDAV username
-   - the user's WebDAV password or a rotate/reset action
-   - note that this works only between Readest apps
-6. Upload a book
+5. Upload a book
    - hidden unless enabled
    - staged upload only
    - legal/source reminder
    - uploaded books appear after owner review/import
-7. Advanced
-   - raw OPDS/KOSync/WebDAV values
+6. Advanced
+   - raw OPDS/KOSync values
    - troubleshooting
 
 Do not show family users:
@@ -177,18 +177,11 @@ Official `koreader/kosync` remains the primary server for the pilot, but the lac
 - manage official KOSync user keys directly in Redis under a pinned version, with probes proving create/disable/purge/rotate behavior, or
 - switch to a compatible KOSync server with a real admin API if direct Redis management proves brittle.
 
-### WebDAV
+### Deferred WebDAV
 
-WebDAV must have private per-user roots, for example:
-
-```text
-/srv/books/readest-webdav/alice
-/srv/books/readest-webdav/neil
-```
-
-Do not use one shared WebDAV bucket.
-
-Do not rely on basic rclone WebDAV alone unless it is paired with an auth/root-mapping layer. A conservative implementation should use a free self-hosted WebDAV server that can enforce per-user roots and permissions. Apache `mod_dav` behind nginx is acceptable; another free self-hosted server is acceptable if it has first-class per-user home directories and can be reproduced from the repo.
+Do not implement WebDAV in the first family version. If it comes back later, it
+must have private per-user roots and a test proving it does not overwrite
+KOSync progress.
 
 ### Calibre-Web
 
@@ -235,16 +228,14 @@ Disable:
 
 - revoke OPDS credentials
 - revoke KOSync credentials
-- revoke WebDAV credentials
 - disable setup page
 - disable optional family web/upload route
-- preserve KOSync progress and WebDAV state
+- preserve KOSync progress
 
 Purge:
 
 - require owner confirmation
 - require a recent backup or explicit backup skip
-- delete or archive WebDAV state
 - delete KOSync user/progress
 - delete optional Calibre-Web user
 - remove setup secrets
@@ -257,7 +248,6 @@ Restore:
 - restore `/srv/books/library`
 - restore `/srv/books/calibre-web`
 - restore `/srv/books/kosync`
-- restore `/srv/books/readest-webdav`
 - run `./scripts/onboard`
 - run `./scripts/books users reconcile`
 - run credential probes
@@ -265,9 +255,7 @@ Restore:
 ## Blocked Variants
 
 - Shared KOSync credentials for a family.
-- Shared Readest WebDAV root.
 - Calibre-Web DB as the account source of truth.
-- Per-user WebDAV systemd units as the default.
 - Family upload directly into `/srv/books/library`.
 - Family users with Calibre-Web admin, edit, or delete roles.
 - Admin panel shelling out arbitrary commands.
@@ -276,12 +264,11 @@ Restore:
 
 ## Acceptance Criteria
 
-- Creating a family user provisions OPDS, KOSync, and WebDAV credentials for that user only.
+- Creating a family user provisions OPDS and KOSync credentials for that user only.
 - Two users can read the same canonical EPUB without progress collisions.
-- Readest notes/highlights sync only within that user's WebDAV root.
 - Family users cannot see owner credentials or other users' credentials.
 - Family users cannot mutate `/srv/books/library` directly.
-- Disabling a user makes old OPDS, KOSync, WebDAV, and setup-page credentials fail.
+- Disabling a user makes old OPDS, KOSync, and setup-page credentials fail.
 - Purging a user removes that user's sync/state data without touching shared books.
 - A non-technical user can complete setup from the page alone.
 - Re-running onboarding plus `users reconcile` recreates derived service config from the repo and runtime registry.

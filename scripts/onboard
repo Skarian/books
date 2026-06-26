@@ -9,6 +9,8 @@ OPT_BIN="${OPT_DIR}/bin"
 NGINX_CONF=/etc/nginx/conf.d/books.conf
 SYSTEMD_UNIT=/etc/systemd/system/books-calibre.service
 CALIBRE_WEB_SYSTEMD_UNIT=/etc/systemd/system/books-calibre-web.service
+PORTAL_SYSTEMD_UNIT=/etc/systemd/system/books-portal.service
+KOSYNC_SYSTEMD_UNIT=/etc/systemd/system/books-kosync.service
 ORIGINAL_ARGS=("$@")
 
 if [[ ${EUID} -ne 0 ]]; then
@@ -160,7 +162,10 @@ write_env() {
     printf 'BOOKS_LOG_DIR=%s\n' "$(shell_quote "${BOOKS_LOG_DIR}")"
     printf 'BOOKS_CONFIG_DIR=%s\n' "$(shell_quote "${BOOKS_CONFIG_DIR}")"
     printf 'BOOKS_USERDB=%s\n' "$(shell_quote "${BOOKS_USERDB}")"
+    printf 'BOOKS_ACCOUNTS_DB=%s\n' "$(shell_quote "${BOOKS_ACCOUNTS_DB}")"
+    printf 'BOOKS_REQUESTS_DIR=%s\n' "$(shell_quote "${BOOKS_REQUESTS_DIR}")"
     printf 'BOOKS_CALIBRE_LIBRARY_ID=%s\n' "$(shell_quote "${BOOKS_CALIBRE_LIBRARY_ID}")"
+    printf 'BOOKS_PORTAL_PORT=%s\n' "$(shell_quote "${BOOKS_PORTAL_PORT}")"
     printf 'CALIBRE_PORT=%s\n' "$(shell_quote "${CALIBRE_PORT}")"
     printf 'CALIBRE_VERSION=%s\n' "$(shell_quote "${CALIBRE_VERSION}")"
     printf 'CALIBRE_ADMIN_USER=%s\n' "$(shell_quote "${CALIBRE_ADMIN_USER}")"
@@ -174,6 +179,12 @@ write_env() {
     printf 'CALIBRE_WEB_GDRIVE_DB=%s\n' "$(shell_quote "${CALIBRE_WEB_GDRIVE_DB}")"
     printf 'CALIBRE_WEB_ADMIN_USER=%s\n' "$(shell_quote "${CALIBRE_WEB_ADMIN_USER}")"
     printf 'CALIBRE_WEB_ADMIN_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_WEB_ADMIN_PASSWORD}")"
+    printf 'KOSYNC_PORT=%s\n' "$(shell_quote "${KOSYNC_PORT}")"
+    printf 'KOSYNC_IMAGE=%s\n' "$(shell_quote "${KOSYNC_IMAGE}")"
+    printf 'KOSYNC_CONTAINER=%s\n' "$(shell_quote "${KOSYNC_CONTAINER}")"
+    printf 'KOSYNC_DATA_DIR=%s\n' "$(shell_quote "${KOSYNC_DATA_DIR}")"
+    printf 'KOSYNC_LOG_DIR=%s\n' "$(shell_quote "${KOSYNC_LOG_DIR}")"
+    printf 'KOSYNC_ENABLE_REGISTRATION=%s\n' "$(shell_quote "${KOSYNC_ENABLE_REGISTRATION}")"
     printf 'ANNAS_VERSION=%s\n' "$(shell_quote "${ANNAS_VERSION}")"
     printf 'ANNAS_BASE_URL=%s\n' "$(shell_quote "${ANNAS_BASE_URL}")"
     printf 'ANNAS_SECRET_KEY=%s\n' "$(shell_quote "${ANNAS_SECRET_KEY}")"
@@ -195,6 +206,8 @@ ensure_packages() {
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     ca-certificates \
     curl \
+    docker.io \
+    git \
     jq \
     nginx \
     python3 \
@@ -298,7 +311,8 @@ ensure_users_and_dirs() {
 
   install -d -o books -g books -m 0750 "${BOOKS_DATA_DIR}" "${BOOKS_CONFIG_DIR}" "${BOOKS_LOG_DIR}"
   install -d -o books -g books -m 0750 "${CALIBRE_WEB_DIR}"
-  install -d -o books -g books -m 2770 "${BOOKS_LIBRARY_DIR}" "${BOOKS_DOWNLOAD_DIR}" "${BOOKS_IMPORT_DIR}"
+  install -d -o books -g books -m 0750 "${KOSYNC_DATA_DIR}" "${KOSYNC_DATA_DIR}/redis" "${KOSYNC_LOG_DIR}" "${KOSYNC_LOG_DIR}/redis" "${KOSYNC_LOG_DIR}/app"
+  install -d -o books -g books -m 2770 "${BOOKS_LIBRARY_DIR}" "${BOOKS_DOWNLOAD_DIR}" "${BOOKS_IMPORT_DIR}" "${BOOKS_REQUESTS_DIR}"
   if [[ ! -f "${BOOKS_LIBRARY_DIR}/metadata.db" ]]; then
     runuser -u books -- calibredb --with-library "${BOOKS_LIBRARY_DIR}" list >/dev/null
   fi
@@ -426,6 +440,8 @@ render_template() {
     -e "s|__BOOKS_PROXY_PORT__|${BOOKS_PROXY_PORT}|g" \
     -e "s|__CALIBRE_PORT__|${CALIBRE_PORT}|g" \
     -e "s|__CALIBRE_WEB_PORT__|${CALIBRE_WEB_PORT}|g" \
+    -e "s|__BOOKS_PORTAL_PORT__|${BOOKS_PORTAL_PORT}|g" \
+    -e "s|__KOSYNC_PORT__|${KOSYNC_PORT}|g" \
     "${src}" > "${tmp}"
   install -m 0644 "${tmp}" "${dest}"
   rm -f "${tmp}"
@@ -435,11 +451,20 @@ install_wrappers() {
   install -d -m 0755 "${OPT_BIN}"
   install -m 0755 "${ROOT_DIR}/bin/books-annas" "${OPT_BIN}/books-annas"
   install -m 0755 "${ROOT_DIR}/bin/books-import" "${OPT_BIN}/books-import"
+  install -m 0755 "${ROOT_DIR}/bin/books-users" "${OPT_BIN}/books-users"
+  install -m 0755 "${ROOT_DIR}/bin/books-portal" "${OPT_BIN}/books-portal"
+}
+
+ensure_kosync_image() {
+  systemctl enable --now docker >/dev/null 2>&1 || true
+  docker pull "${KOSYNC_IMAGE}"
 }
 
 install_services() {
   install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre.service" "${SYSTEMD_UNIT}"
   install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre-web.service" "${CALIBRE_WEB_SYSTEMD_UNIT}"
+  install -m 0644 "${ROOT_DIR}/config/systemd/books-portal.service" "${PORTAL_SYSTEMD_UNIT}"
+  install -m 0644 "${ROOT_DIR}/config/systemd/books-kosync.service" "${KOSYNC_SYSTEMD_UNIT}"
   render_template "${ROOT_DIR}/config/nginx/books.conf.template" "${NGINX_CONF}"
   if [[ -L /etc/nginx/sites-enabled/default ]]; then
     rm -f /etc/nginx/sites-enabled/default
@@ -447,8 +472,11 @@ install_services() {
   systemctl daemon-reload
   nginx -t
   if [[ "${skip_start}" != true ]]; then
-    systemctl enable --now books-calibre
-    systemctl enable --now books-calibre-web
+    systemctl enable books-calibre books-calibre-web books-portal books-kosync nginx
+    systemctl restart books-calibre
+    systemctl restart books-calibre-web
+    systemctl restart books-portal
+    systemctl restart books-kosync
     systemctl enable --now nginx
     systemctl reload nginx
   fi
@@ -473,7 +501,10 @@ BOOKS_IMPORT_DIR="${BOOKS_IMPORT_DIR:-${BOOKS_DATA_DIR}/import}"
 BOOKS_LOG_DIR="${BOOKS_LOG_DIR:-${BOOKS_DATA_DIR}/log}"
 BOOKS_CONFIG_DIR="${BOOKS_CONFIG_DIR:-${BOOKS_DATA_DIR}/config}"
 BOOKS_USERDB="${BOOKS_USERDB:-${BOOKS_CONFIG_DIR}/users.sqlite}"
+BOOKS_ACCOUNTS_DB="${BOOKS_ACCOUNTS_DB:-${BOOKS_CONFIG_DIR}/accounts.sqlite}"
+BOOKS_REQUESTS_DIR="${BOOKS_REQUESTS_DIR:-${BOOKS_DATA_DIR}/requests}"
 BOOKS_CALIBRE_LIBRARY_ID="${BOOKS_CALIBRE_LIBRARY_ID:-library}"
+BOOKS_PORTAL_PORT="${BOOKS_PORTAL_PORT:-8090}"
 
 ask CALIBRE_PORT "Calibre localhost port" "${CALIBRE_PORT:-8080}"
 ask CALIBRE_VERSION "Calibre version" "${CALIBRE_VERSION:-9.9.0}"
@@ -497,6 +528,15 @@ CALIBRE_WEB_ADMIN_USER="${CALIBRE_WEB_ADMIN_USER:-${CALIBRE_ADMIN_USER}}"
 if [[ -z "${CALIBRE_WEB_ADMIN_PASSWORD:-}" ]]; then
   CALIBRE_WEB_ADMIN_PASSWORD="${CALIBRE_ADMIN_PASSWORD}"
 fi
+KOSYNC_PORT="${KOSYNC_PORT:-7200}"
+KOSYNC_IMAGE="${KOSYNC_IMAGE:-koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1}"
+if [[ "${KOSYNC_IMAGE}" == "koreader/kosync:latest" ]]; then
+  KOSYNC_IMAGE="koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1"
+fi
+KOSYNC_CONTAINER="${KOSYNC_CONTAINER:-books-kosync}"
+KOSYNC_DATA_DIR="${KOSYNC_DATA_DIR:-${BOOKS_DATA_DIR}/kosync}"
+KOSYNC_LOG_DIR="${KOSYNC_LOG_DIR:-${BOOKS_LOG_DIR}/kosync}"
+KOSYNC_ENABLE_REGISTRATION="${KOSYNC_ENABLE_REGISTRATION:-false}"
 
 write_env
 ensure_packages
@@ -506,13 +546,18 @@ ensure_users_and_dirs
 ensure_env_permissions
 ensure_annas_mcp
 install_wrappers
+ensure_kosync_image
 ensure_calibre_userdb
 ensure_calibre_web_db
+/opt/books/bin/books-users init
 install_services
+/opt/books/bin/books-users reconcile || true
 install_skill
 
 echo "Books service configured."
 echo "Local health: http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz"
-echo "Calibre-Web URL: https://${BOOKS_PUBLIC_HOST}/"
+echo "Books portal: https://${BOOKS_PUBLIC_HOST}/"
+echo "Calibre-Web URL: https://${BOOKS_PUBLIC_HOST}/calibre/"
 echo "OPDS URL for Crosspoint: https://${BOOKS_PUBLIC_HOST}/opds"
+echo "KOSync URL for progress: https://${BOOKS_PUBLIC_HOST}/kosync"
 echo "Run ./scripts/books proxy-commands for the documented exe.dev share commands."

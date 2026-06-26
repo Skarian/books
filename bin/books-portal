@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+import base64
+import datetime as dt
+import html
+import json
+import os
+import sqlite3
+import sys
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+ENV_FILE = Path("/etc/books/books.env")
+
+
+def load_env():
+    env = {}
+    if ENV_FILE.exists():
+        for line in ENV_FILE.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] == "'":
+                value = value[1:-1].replace("'\\''", "'")
+            env[key] = value
+    return env
+
+
+ENV = load_env()
+PUBLIC_HOST = ENV.get("BOOKS_PUBLIC_HOST", "books.exe.xyz")
+ALLOWED_EMAIL = ENV.get("BOOKS_ALLOWED_EMAIL", "neil.skaria@gmail.com")
+ACCOUNTS_DB = Path(ENV.get("BOOKS_ACCOUNTS_DB", "/srv/books/config/accounts.sqlite"))
+REQUESTS_DIR = Path(ENV.get("BOOKS_REQUESTS_DIR", "/srv/books/requests"))
+PORT = int(ENV.get("BOOKS_PORTAL_PORT", "8090"))
+
+
+STYLE = """
+body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f2ec;color:#191815}
+a{color:#205c55;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:1120px;margin:0 auto;padding:28px}
+.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:24px}
+.brand{font-size:28px;font-weight:720}.muted{color:#686158}.nav{display:flex;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:14px}.stack{display:grid;gap:14px}
+.card{background:#fff;border:1px solid #ded8cf;border-radius:8px;padding:18px;box-shadow:0 1px 2px #0000000f}
+.card h1,.card h2,.card h3{margin:0 0 8px}.card p{line-height:1.45}
+.button{display:inline-block;background:#1f5f55;color:#fff;padding:10px 14px;border-radius:6px;border:0;font-weight:650}.button:hover{text-decoration:none;background:#184c44}
+input,textarea{width:100%;box-sizing:border-box;border:1px solid #cbc4ba;border-radius:6px;padding:10px;background:#fff;font:inherit}
+label{display:block;font-weight:650;margin:12px 0 5px}.row{display:flex;gap:10px;flex-wrap:wrap}.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#f0ece5;padding:2px 5px;border-radius:4px;word-break:break-all}
+pre.code{display:block;padding:10px;white-space:pre-wrap}.pill{display:inline-block;border:1px solid #d6cec2;background:#f7f3eb;border-radius:999px;padding:3px 8px;font-size:12px;color:#504941}
+.ok{color:#1f5f55}.warn{color:#8a4d14}.bad{color:#9d1d20}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #ded8cf}th,td{padding:10px;border-bottom:1px solid #eee8df;text-align:left;vertical-align:top}
+@media(max-width:720px){.top{display:block}.nav{justify-content:flex-start;margin-top:12px}.wrap{padding:18px}}
+"""
+
+
+def db():
+    conn = sqlite3.connect(ACCOUNTS_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def esc(value):
+    return html.escape("" if value is None else str(value))
+
+
+def now():
+    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
+
+
+def request_files(slug=None):
+    REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
+    pattern = f"{slug}/*.json" if slug else "*/*.json"
+    return sorted(REQUESTS_DIR.glob(pattern), reverse=True)
+
+
+def load_requests(slug=None):
+    rows = []
+    for path in request_files(slug):
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            continue
+        data["_path"] = str(path)
+        rows.append(data)
+    return rows
+
+
+def status_class(status):
+    if status in {"fulfilled", "done"}:
+        return "ok"
+    if status in {"rejected"}:
+        return "bad"
+    return "warn"
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "BooksPortal/1.0"
+
+    def log_message(self, fmt, *args):
+        sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+
+    def send_html(self, title, body, code=200):
+        content = f"<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>{esc(title)}</title><style>{STYLE}</style></head><body><main class='wrap'>{body}</main></body></html>".encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.end_headers()
+        self.wfile.write(content)
+
+    def redirect(self, path):
+        self.send_response(303)
+        self.send_header("Location", path)
+        self.end_headers()
+
+    def owner(self):
+        return self.headers.get("X-ExeDev-Email") == ALLOWED_EMAIL
+
+    def require_owner(self):
+        if self.owner():
+            return True
+        self.send_html("Forbidden", "<div class='card'><h1>Forbidden</h1></div>", 403)
+        return False
+
+    def setup_auth(self, slug):
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Basic "):
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Books setup"')
+            self.end_headers()
+            return None
+        try:
+            userpass = base64.b64decode(auth.split(" ", 1)[1]).decode()
+            username, password = userpass.split(":", 1)
+        except Exception:
+            self.send_response(401)
+            self.end_headers()
+            return None
+        conn = db()
+        row = conn.execute("select * from accounts where slug=? and status='active'", (slug,)).fetchone()
+        conn.close()
+        if not row or username != row["setup_user"] or password != row["setup_password"]:
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Books setup"')
+            self.end_headers()
+            return None
+        return row
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        if path == "/healthz":
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok\n")
+        elif path == "/":
+            self.home()
+        elif path == "/guide":
+            self.guide()
+        elif path == "/users":
+            self.users()
+        elif path == "/requests":
+            self.requests()
+        elif path.startswith("/setup/"):
+            self.setup_page(path.split("/", 2)[2])
+        else:
+            self.send_html("Not found", "<div class='card'><h1>Not found</h1></div>", 404)
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        if path.startswith("/setup/") and path.endswith("/request"):
+            slug = path.split("/")[2]
+            row = self.setup_auth(slug)
+            if not row:
+                return
+            length = int(self.headers.get("Content-Length", "0"))
+            form = urllib.parse.parse_qs(self.rfile.read(length).decode())
+            title = form.get("title", [""])[0].strip()
+            notes = form.get("notes", [""])[0].strip()
+            legal = form.get("legal", [""])[0] == "yes"
+            if not title or not legal:
+                self.send_html("Book request", "<div class='card'><h1>Missing title or legal confirmation.</h1><p><a href='../%s'>Back</a></p></div>" % esc(row["slug"]), 400)
+                return
+            user_dir = REQUESTS_DIR / row["slug"]
+            user_dir.mkdir(parents=True, exist_ok=True)
+            request_id = now().replace(":", "").replace("+", "Z")
+            payload = {"id": request_id, "created_at": now(), "status": "new", "user": row["slug"], "title": title, "notes": notes}
+            (user_dir / f"{request_id}.json").write_text(json.dumps(payload, indent=2))
+            self.redirect(f"/setup/{row['slug']}")
+        else:
+            self.send_html("Not found", "<div class='card'><h1>Not found</h1></div>", 404)
+
+    def chrome(self, title, inner):
+        return f"<div class='top'><div><div class='brand'>Neil's Books</div><div class='muted'>{esc(title)}</div></div><nav class='nav'><a href='/'>Home</a><a href='/guide'>Guide</a><a href='/users'>Users</a><a href='/requests'>Requests</a><a href='/calibre/'>Calibre</a></nav></div>{inner}"
+
+    def home(self):
+        if not self.require_owner():
+            return
+        conn = db()
+        users = conn.execute("select count(*) from accounts where status='active'").fetchone()[0]
+        conn.close()
+        requests = load_requests()
+        open_requests = sum(1 for row in requests if row.get("status", "new") not in {"fulfilled", "done", "rejected"})
+        body = f"""
+        <section class='card'><h1>Library cockpit</h1><p>This is the owner start page for the self-hosted reading setup. Books come from Calibre OPDS, reading position syncs through KOSync, and each person gets a private setup page.</p><div class='row'><span class='pill'>{users} active reader{"s" if users != 1 else ""}</span><span class='pill'>{open_requests} open request{"s" if open_requests != 1 else ""}</span><span class='pill'>KOSync on /kosync</span><span class='pill'>OPDS on /opds</span></div></section>
+        <div class='grid'>
+          <section class='card'><h2>Read</h2><p>Owner Calibre-Web reader and library UI.</p><a class='button' href='/calibre/'>Open Calibre</a></section>
+          <section class='card'><h2>Set up devices</h2><p>Readest, CrossPoint, KOReader, and the exact sync URLs.</p><a class='button' href='/guide'>Open Guide</a></section>
+          <section class='card'><h2>Family users</h2><p>Add readers by chatting with Codex or using the CLI, then share their setup page.</p><a class='button' href='/users'>View Users</a></section>
+          <section class='card'><h2>Book requests</h2><p>Requests submitted from setup pages for agent-assisted search, download, and import.</p><a class='button' href='/requests'>Review Requests</a></section>
+        </div>
+        """
+        self.send_html("Home", self.chrome("home", body))
+
+    def guide(self):
+        if not self.require_owner():
+            return
+        body = f"""
+        <div class='stack'>
+        <section class='card'><h1>Device guide</h1><p>Use the per-user setup page for credentials. The shared values are stable:</p><p>OPDS catalog <span class='code'>https://{PUBLIC_HOST}/opds</span></p><p>KOSync server <span class='code'>https://{PUBLIC_HOST}/kosync</span></p></section>
+        <section class='card'><h2>Readest on Android, iPad, Mac, and Windows</h2><p>Add <b>OPDS Catalogs</b>, download the EPUB, then add <b>KOReader Sync</b>. Set checksum to <b>File Content</b>. Leave WebDAV off for now.</p><p>If Readest asks for a server URL, use exactly <span class='code'>https://{PUBLIC_HOST}/kosync</span>.</p></section>
+        <section class='card'><h2>XTEink X4 with CrossPoint</h2><p>Add the OPDS catalog, download the EPUB from this server, then configure KOReader-compatible progress sync with the same reader's KOSync account.</p></section>
+        <section class='card'><h2>KOReader</h2><p>Add the OPDS catalog and configure Progress Sync. Use binary matching. KOReader is the reference client for testing progress sync.</p></section>
+        <section class='card'><h2>Important</h2><p>Do not append <span class='code'>/api</span>, <span class='code'>/v1</span>, or <span class='code'>/healthcheck</span> to the KOSync URL. Do not copy random EPUB files between apps if progress matters; download the same EPUB from OPDS.</p></section>
+        </div>
+        """
+        self.send_html("Guide", self.chrome("device setup", body))
+
+    def users(self):
+        if not self.require_owner():
+            return
+        conn = db()
+        rows = conn.execute("select * from accounts where status!='deleted' order by display_name").fetchall()
+        conn.close()
+        table = "<table><tr><th>User</th><th>Status</th><th>Email</th><th>Setup page</th><th>Setup login</th><th>CLI</th></tr>"
+        for row in rows:
+            table += f"<tr><td>{esc(row['display_name'])}</td><td><span class='pill'>{esc(row['status'])}</span></td><td>{esc(row['email'])}</td><td><a href='/setup/{esc(row['slug'])}'>/setup/{esc(row['slug'])}</a></td><td><div class='code'>{esc(row['setup_user'])}</div><div class='code'>{esc(row['setup_password'])}</div></td><td><pre class='code'>./scripts/books users show {esc(row['slug'])}</pre><pre class='code'>./scripts/books users rotate {esc(row['slug'])} all</pre></td></tr>"
+        table += "</table>"
+        body = f"<section class='card'><h1>Users</h1><p>Create users by asking Codex, or run <span class='code'>./scripts/books users create \"Name\" --email person@example.com</span>.</p>{table}</section>"
+        self.send_html("Users", self.chrome("family users", body))
+
+    def requests(self):
+        if not self.require_owner():
+            return
+        REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
+        rows = []
+        for data in load_requests():
+            status = data.get("status", "new")
+            path = data.get("_path", "")
+            rows.append(f"<tr><td>{esc(data.get('created_at'))}</td><td>{esc(data.get('user'))}</td><td>{esc(data.get('title'))}<br><span class='muted'>{esc(data.get('notes'))}</span></td><td><span class='pill {status_class(status)}'>{esc(status)}</span></td><td><pre class='code'>./scripts/books requests process {esc(path)}</pre><pre class='code'>./scripts/books requests fulfill {esc(path)} MD5_HASH filename.epub</pre></td></tr>")
+        table = "<table><tr><th>Time</th><th>User</th><th>Request</th><th>Status</th><th>Agent command</th></tr>%s</table>" % "".join(rows)
+        body = f"<section class='card'><h1>Book requests</h1><p>Requests are stored as JSON and processed by the repo CLI. The user has already confirmed legal access before a request is queued.</p>{table}</section>"
+        self.send_html("Requests", self.chrome("book requests", body))
+
+    def setup_page(self, slug):
+        row = self.setup_auth(slug)
+        if not row:
+            return
+        rows = []
+        for data in load_requests(row["slug"]):
+            status = data.get("status", "new")
+            rows.append(f"<tr><td>{esc(data.get('created_at'))}</td><td>{esc(data.get('title'))}</td><td><span class='pill {status_class(status)}'>{esc(status)}</span></td><td>{esc(data.get('owner_note'))}</td></tr>")
+        request_table = "<p class='muted'>No requests yet.</p>" if not rows else "<table><tr><th>Time</th><th>Book</th><th>Status</th><th>Note</th></tr>%s</table>" % "".join(rows)
+        body = f"""
+        <div class='top'><div><div class='brand'>Neil's Books for {esc(row['display_name'])}</div><div class='muted'>shared books, private reading place</div></div></div>
+        <div class='grid'>
+          <section class='card'><h2>1. Download books</h2><p>Use this OPDS catalog in Readest, CrossPoint, or KOReader.</p><p class='code'>https://{PUBLIC_HOST}/opds</p><p>Username <span class='code'>{esc(row['opds_user'])}</span></p><p>Password <span class='code'>{esc(row['opds_password'])}</span></p></section>
+          <section class='card'><h2>2. Sync your place</h2><p>Use this for KOReader Sync / Progress Sync.</p><p class='code'>https://{PUBLIC_HOST}/kosync</p><p>Username <span class='code'>{esc(row['kosync_user'])}</span></p><p>Password <span class='code'>{esc(row['kosync_password'])}</span></p><p>Readest: File Content. KOReader: Binary.</p></section>
+          <section class='card'><h2>3. Apps</h2><p><b>Readest</b>: Android, iPad, Mac, Windows.</p><p><b>CrossPoint</b>: XTEink X4.</p><p><b>KOReader</b>: any device where it feels better.</p><p>Leave WebDAV off.</p></section>
+        </div>
+        <section class='card' style='margin-top:14px'><h2>Request a book</h2><form method='post' action='/setup/{esc(row['slug'])}/request'><label>Title / author</label><input name='title' required><label>Notes</label><textarea name='notes' rows='4'></textarea><label><input style='width:auto' type='checkbox' name='legal' value='yes' required> I own this, it is public domain, Creative Commons, or I am otherwise allowed to access it.</label><button class='button' type='submit'>Send request</button></form></section>
+        <section class='card' style='margin-top:14px'><h2>Your requests</h2>{request_table}</section>
+        """
+        self.send_html("Setup", body)
+
+
+if __name__ == "__main__":
+    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

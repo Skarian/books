@@ -10,11 +10,15 @@ description: Find, stage, import, and operate books for Neil's personal Calibre 
 Use the repo helpers from `/home/exedev/books` rather than ad hoc commands:
 
 - Inspect health with `./scripts/books health` and status with `./scripts/books status`.
+- Run `./scripts/books verify USER` after deployment or auth changes.
 - Import EPUBs with `./scripts/books import /path/to/book.epub`.
 - Convert only when needed with `./scripts/books import --convert /path/to/file`.
 - Use Anna's Archive MCP/CLI through `./scripts/books anna ...` after the user's API key is configured.
 - Show Crosspoint setup values with `./scripts/books opds-url`.
+- Show KOSync setup values with `./scripts/books kosync-url`.
 - Show the owner-only Calibre-Web reader URL with `./scripts/books web-url`.
+- Manage family users with `./scripts/books users ...`.
+- Review web book requests with `./scripts/books requests ...`.
 - Show documented exe.dev proxy commands with `./scripts/books proxy-commands`.
 
 Only use acquisition/download tooling for material the user is legally permitted to access, such as public domain, Creative Commons, owned, or otherwise authorized works. When unclear, ask for confirmation before downloading.
@@ -30,5 +34,8 @@ Runtime books and secrets are intentionally outside git:
 - `/srv/books/downloads`
 - `/srv/books/import`
 - `/srv/books/calibre-web`
+- `/srv/books/kosync`
+- `/srv/books/requests`
+- `/srv/books/config/accounts.sqlite`
 
 Read `references/service.md` before changing deployment, nginx, systemd, Calibre-Web, OPDS, Anna's Archive, or import behavior.

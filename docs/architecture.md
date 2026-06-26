@@ -15,18 +15,16 @@ https://books.exe.xyz
   /opds             -> shared Calibre bookshelf
   /get/...          -> canonical EPUB downloads
   /kosync           -> progress sync
-  /dav/readest/...  -> Readest state sync
-  /admin            -> owner family admin
-  /                 -> owner Calibre-Web
+  /setup/<user>     -> per-user setup and book requests
+  /calibre/         -> owner Calibre-Web
+  /                 -> owner portal
 ```
 
 The split matters:
 
 - Calibre owns the books.
 - KOSync owns reading position.
-- Readest WebDAV owns Readest notes, highlights, covers, backups, and optional
-  file sync.
-- The admin panel owns the family workflow, not the library data itself.
+- The account helper owns the family workflow, not the library data itself.
 
 No service should take over another service's job. That keeps restore and
 debugging sane.
@@ -38,17 +36,25 @@ Reader apps need routes they can reach without an exe.dev browser session:
 - `/opds`
 - `/get/...`
 - `/kosync`
-- `/dav/readest/...`
 
 Those routes authenticate with service credentials. OPDS uses Calibre Basic auth.
-KOSync uses KOSync credentials. WebDAV uses WebDAV credentials.
+KOSync uses KOSync credentials.
+
+The public KOSync URL for clients is `https://books.exe.xyz/kosync`. Reader apps
+append KOSync API paths such as `/users/auth` and `/syncs/progress`, so nginx
+must strip the `/kosync` prefix before proxying to the KOSync upstream. For
+example, `/kosync/users/auth` must reach upstream `/users/auth`, and
+`/kosync/healthcheck` must reach upstream `/healthcheck`.
+
+Do not configure clients with `/api`, `/v1`, or `/healthcheck` appended. The
+client base URL is exactly `https://books.exe.xyz/kosync`.
 
 Owner routes stay behind exe.dev login for `neil.skaria@gmail.com`:
 
 - `/`
-- `/admin`
+- `/calibre/`
 - any page that can list users or reveal setup links
-- Calibre-Web
+- any future `/admin` route
 
 Per-user setup pages get their own access control and no-store caching. They can
 show that user's credentials, but never owner credentials or another user's
@@ -61,11 +67,48 @@ credentials.
 | Calibre | EPUB files, metadata, OPDS catalog, downloads | progress, highlights, family admin |
 | Calibre-Web | owner browser reader and owner library UI | public family admin, cross-device progress |
 | KOSync | per-user reading position for canonical EPUBs | book files, notes, highlights |
-| Readest WebDAV | per-user Readest state | CrossPoint or KOReader state |
-| Admin panel | owner workflow for users and setup pages | direct service state outside the shared helper |
+| Account helper | users, credentials, setup pages, service reconciliation | direct service state outside the shared helper |
 
-The admin panel is a UI over the same account helper used by
-`scripts/books users ...`. The panel does not get a private data path.
+`scripts/books users ...` is the primary owner interface. Codex can use it
+through the `books` skill when Neil wants to add, disable, rotate, or inspect a
+reader account by chatting. A future admin panel is optional UI over the same
+helper and does not get a private data path.
+
+## Progress authority
+
+KOSync is the only cross-app progress authority. CrossPoint, KOReader, and
+Readest should all push and pull reading position through `/kosync` with a
+separate account per reader.
+
+Official KOSync is last-write-wins. A later update can move progress backward.
+That is acceptable for one human moving between devices, but it is why each
+person needs a separate KOSync account.
+
+Readest gets books through OPDS and syncs position through KOReader Sync. That
+is the default path. It is simple enough for normal users, and it keeps Readest
+on the same canonical EPUB bytes as CrossPoint and KOReader.
+
+Current upstream Readest exposes these integrations separately:
+
+- OPDS Catalogs: catalog URL, optional username, optional password, optional
+  custom headers, browse/download action, and optional auto-download.
+- KOReader Sync: server URL, username, password, enable switch, strategy, file
+  content checksum, device name.
+
+Do not add WebDAV to the default build. Readest's WebDAV support is a separate
+sync channel that can move per-book config, including progress and location.
+That makes it a second writer next to KOSync. If OPDS plus KOSync fails a real
+device test, or if Readest-only notes/backups become a hard requirement, WebDAV
+can be introduced later behind a new test matrix section.
+
+The honest limitation: official KOSync is progress-only. It does not sync
+Readest highlights, notes, bookmarks, collections, ratings, or book files. That
+is acceptable for the core repo because the requirement that matters most is
+continuing from the same place across devices.
+
+Document identity is partial-MD5/file-content identity, not full-file MD5.
+KOReader calls this binary matching. Readest labels it `File Content` and stores
+the same style of partial MD5 as `book.hash`.
 
 ## Runtime state
 
@@ -82,7 +125,6 @@ Runtime state stays outside git:
 - `/srv/books/config`
 - `/srv/books/calibre-web`
 - `/srv/books/kosync`
-- `/srv/books/readest-webdav`
 - `/srv/books/inbox`
 
 Backups need the runtime paths. Git recreates the service, not the books or
@@ -109,18 +151,20 @@ Implemented now:
 
 - Calibre
 - Calibre-Web
+- owner portal
 - nginx
 - Anna's Archive MCP/CLI
 - OPDS and `/get/...`
+- KOSync
+- family account registry
+- `scripts/books users ...`
+- setup pages
+- book request queue
 - owner-only Calibre-Web
 - import helpers
 - onboarding
 
 Not wired yet:
 
-- KOSync
-- Readest WebDAV
-- family account registry
-- `scripts/books users ...`
-- setup pages
-- owner admin panel
+- optional owner admin panel
+- family upload staging UI

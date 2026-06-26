@@ -1,0 +1,21 @@
+[Unit]
+Description=Books KOSync server
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+EnvironmentFile=/etc/books/books.env
+ExecStartPre=-/usr/bin/docker rm -f ${KOSYNC_CONTAINER}
+ExecStart=/usr/bin/docker run --name ${KOSYNC_CONTAINER} --rm \
+  -p 127.0.0.1:${KOSYNC_PORT}:7200 \
+  -e ENABLE_USER_REGISTRATION=${KOSYNC_ENABLE_REGISTRATION} \
+  -v ${KOSYNC_DATA_DIR}/redis:/var/lib/redis \
+  -v ${KOSYNC_LOG_DIR}/redis:/var/log/redis \
+  -v ${KOSYNC_LOG_DIR}/app:/app/koreader-sync-server/logs \
+  ${KOSYNC_IMAGE}
+ExecStop=/usr/bin/docker stop ${KOSYNC_CONTAINER}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

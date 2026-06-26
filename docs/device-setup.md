@@ -1,11 +1,13 @@
 # Device setup
 
 Books are downloaded from the shared OPDS catalog. Reading position syncs through
-the reader's own KOSync account. Readest gets a separate WebDAV account for
-Readest-only state.
+the reader's own KOSync account.
 
 Do not copy random EPUB files between devices if progress matters. Use the OPDS
 download so every app starts from the same canonical file.
+
+KOSync is the progress authority. Do not configure Readest WebDAV for the core
+pilot. It is a fallback only if OPDS plus KOSync fails a real device test.
 
 ## Credentials
 
@@ -15,11 +17,9 @@ Each reader has these credentials:
 |---|---|---|
 | Download books | `https://books.exe.xyz/opds` | OPDS username and password |
 | Sync reading position | `https://books.exe.xyz/kosync` | KOSync username and password |
-| Sync Readest notes/backups | `https://books.exe.xyz/dav/readest/...` | WebDAV username and password |
 
-The repo contract is per-user OPDS, KOSync, and WebDAV credentials from the
-family account registry. The current implementation only has the shared OPDS
-credential.
+The setup page for each reader shows that reader's OPDS and KOSync credentials.
+Neil can print the same values with `./scripts/books users show USER`.
 
 ## XTEink X4 with CrossPoint
 
@@ -47,11 +47,16 @@ Use Readest on the general-purpose devices.
 5. Use `https://books.exe.xyz/kosync`.
 6. Sign in with the reader's KOSync username and password.
 7. Set document matching to file content.
-8. Add the reader's WebDAV account for Readest notes, highlights, covers,
-   backups, and optional file sync.
 
-Readest WebDAV is only for Readest clients. It does not move highlights into
-CrossPoint or KOReader.
+Do not enter `/api`, `/v1`, or `/healthcheck` after the KOSync URL. The URL is
+exactly `https://books.exe.xyz/kosync`.
+
+Readest exposes OPDS Catalogs and KOReader Sync as normal app settings. Each
+person enters their own KOSync credentials in the KOReader Sync form. That is
+user-accessible inside the app; it does not require an admin dashboard.
+
+Do not turn on Readest WebDAV during the first pilot. It is not needed for book
+downloads or progress sync, and it can introduce a second progress path.
 
 ## KOReader
 
@@ -84,6 +89,8 @@ If a book opens in the wrong place on another device, check these first:
 - Readest uses file-content matching.
 - KOReader uses binary matching.
 - Each person uses a separate KOSync account.
+- Official KOSync is last-write-wins, so a stale device can move progress
+  backward if it syncs later.
 - The Calibre EPUB was not re-converted, metadata-written, optimized, or re-zipped
   after import.
 - The test is running from a real external device. The VM cannot reliably test

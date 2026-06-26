@@ -7,7 +7,10 @@ Tester:
 
 ## Pass/Fail Standard
 
-The core architecture passes only if CrossPoint, KOReader, and Readest can all use the same self-hosted KOSync endpoint for progress on the same EPUB identity. Readest WebDAV is tested separately because it is not a CrossPoint/KOReader bridge.
+The core architecture passes only if CrossPoint, KOReader, and Readest can all
+use the same self-hosted KOSync endpoint for progress on the same EPUB identity.
+Readest should get books from OPDS and progress from KOSync. WebDAV is outside
+the core pass/fail standard.
 
 ## Fixture Books
 
@@ -25,7 +28,6 @@ Use legally owned, public-domain, Creative Commons, or otherwise authorized EPUB
 |---|---|---|---|---|
 | Calibre |  | `/srv/books/library` | `/opds` | Source of truth for EPUB bytes |
 | Official KOSync |  | `/srv/books/kosync` | `/kosync` | Core progress lane |
-| Readest WebDAV |  | `/srv/books/readest-webdav` | `/dav/readest` | Readest-only state lane |
 | BookOrbit pilot |  |  |  | Copied fixtures only |
 | Komga pilot |  |  |  | Copied fixtures only |
 | Grimmory pilot |  |  |  | Copied fixtures only |
@@ -57,16 +59,31 @@ Pass only if downloaded EPUB bytes match the canonical fixture. If a client rewr
 | Readest macOS | `https://books.exe.xyz/opds` | Basic |  |  |  |  |
 | Readest Windows | `https://books.exe.xyz/opds` | Basic |  |  |  |  |
 
+## OPDS Failure Cases
+
+| Test | Expected | Pass | Notes |
+|---|---|---|---|
+| Password-protected Calibre OPDS | Readest can browse and download, not only browse |  |  |
+| iOS download | Readest iPad downloads a protected Calibre EPUB into local library |  |  |
+| macOS download | Readest macOS downloads a protected Calibre EPUB into local library |  |  |
+| Auto-download disabled | User can manually choose books without auto-importing the whole library |  |  |
+| OPDS streaming avoided | Readest imports the EPUB file, not an OPDS-PSE stream identity |  |  |
+
 ## KOSync Service
 
 | Test | Expected | Pass | Notes |
 |---|---|---|---|
 | Public healthcheck | `https://books.exe.xyz/kosync/healthcheck` returns healthy JSON |  |  |
+| Prefix-strip healthcheck | `/kosync/healthcheck` reaches upstream `/healthcheck` |  |  |
+| Prefix-strip auth | `/kosync/users/auth` reaches upstream `/users/auth` |  |  |
+| Client base URL | Clients use `https://books.exe.xyz/kosync`, not `/api`, `/v1`, or `/healthcheck` |  |  |
 | Registration bootstrap | Sync-only user can be created during onboarding |  |  |
 | Registration locked | New public registration fails after bootstrap |  |  |
 | Auth | Existing per-reader user authenticates |  |  |
 | PUT progress | Fixture progress can be uploaded |  |  |
 | GET progress | Same fixture progress can be fetched |  |  |
+| Later lower progress | Later lower progress overwrites earlier higher progress, proving last-write-wins behavior |  |  |
+| Official server only | Endpoint is official `koreader/kosync`, not a partial server implementation |  |  |
 | Restart service | Existing progress remains |  |  |
 | Reboot VM | KOSync returns healthy and state remains |  |  |
 
@@ -78,20 +95,45 @@ Pass only if downloaded EPUB bytes match the canonical fixture. If a client rewr
 | KOReader | `https://books.exe.xyz/kosync` | per-reader user | Binary | Auth works |
 | Readest | `https://books.exe.xyz/kosync` | per-reader user | File Content | Auth works |
 
+## KOSync Account Lifecycle
+
+The helper stores the KOSync userkey in the server data store and shows the raw
+password to people. Clients such as Readest hash the typed password before
+calling KOSync.
+
+| Test | Expected | Pass | Notes |
+|---|---|---|---|
+| Create KOSync user | Userkey is written for the generated raw password |  |  |
+| Readest auth | Raw password entered in Readest authenticates |  |  |
+| Rotate KOSync password | New raw password works; old raw password fails |  |  |
+| Disable KOSync user | Auth fails but progress keys are preserved for restore |  |  |
+| Purge KOSync user | Auth and per-user progress keys are removed after confirmation |  |  |
+
+## Readest Integration Configuration
+
+Readest passes only if a normal user can configure these without owner access.
+
+| Integration | In-app form | Per-user credential | Required setting | Pass | Notes |
+|---|---|---|---|---|---|
+| OPDS Catalogs | OPDS Catalogs | OPDS user/pass | Calibre catalog opens and downloads EPUB |  |  |
+| KOReader Sync | KOReader Sync | KOSync user/pass | Strategy chosen for progress lane; checksum File Content |  |  |
+
 ## Family Account Lifecycle
 
 Use this section before enabling family access. It validates `docs/research/family-multi-user-admin-plan.md`.
 
 | Test | Expected | Pass | Notes |
 |---|---|---|---|
-| Create user | OPDS, KOSync, and WebDAV credentials are created for only that user |  |  |
-| Reconcile users | Derived Calibre/nginx/WebDAV/KOSync/setup state is rebuilt without rotating passwords |  |  |
+| Create user | OPDS and KOSync credentials are created for only that user |  |  |
+| Reconcile users | Derived Calibre/nginx/KOSync/setup state is rebuilt without rotating passwords |  |  |
 | Rotate one user's KOSync password | New password works, old password fails, other users unaffected |  |  |
-| Disable user | OPDS, KOSync, WebDAV, setup page, and upload access fail for that user |  |  |
+| Disable user | OPDS, KOSync, setup page, and upload access fail for that user |  |  |
 | Purge user | User state is removed or archived without touching shared Calibre books |  |  |
 | Setup page privacy | User sees only their own credentials; owner/admin credentials never appear |  |  |
 | Setup page caching | Credential pages send no-store/no-referrer headers and no secrets in URLs |  |  |
-| Owner admin panel | Owner can add/disable/rotate users; non-owner cannot access admin actions |  |  |
+| Secret restore | Encrypted raw passwords and KOSync userkeys restore without forced rotation |  |  |
+| Owner helper | Owner can add/disable/rotate users through `scripts/books users ...`; non-owner cannot access setup/admin actions |  |  |
+| Owner admin panel, if built | Panel uses the same helper and stays behind owner auth |  |  |
 | Audit log | User mutations are recorded with actor, action, target, and timestamp |  |  |
 
 ## Core Progress Round Trips
@@ -137,28 +179,18 @@ Record enough detail to decide whether the X4 experience is pleasant.
 | CrossPoint -> KOReader |  |  |  |  |  |  |
 | KOReader -> CrossPoint |  |  |  |  |  |  |
 
-## Readest WebDAV
+## Deferred WebDAV Investigation
 
-Target: no Readest cloud account. Progress, location, highlights, notes, covers, and optional files sync between Readest clients. This is not evidence that CrossPoint or KOReader can see those highlights/notes.
-
-| From | To | Fixture | Progress | Highlights | Notes | Duplicate books | Notes |
-|---|---|---|---|---|---|---|---|
-| iPad Readest | Android Readest |  |  |  |  |  |  |
-| Android Readest | Mac Readest |  |  |  |  |  |  |
-| Mac Readest | Windows Readest |  |  |  |  |  |  |
-| Windows Readest | iPad Readest |  |  |  |  |  |  |
-
-## Readest WebDAV User Isolation
-
-Target: WebDAV state for one user is not visible to or modified by another user.
+Run this only if the core OPDS plus KOSync path fails, or if Readest-only
+notes/backups become a hard requirement. A WebDAV pilot must prove that it does
+not overwrite KOSync progress before it becomes part of the setup docs.
 
 | Test | Expected | Pass | Notes |
 |---|---|---|---|
-| User A WebDAV auth | User A reaches only User A root |  |  |
-| User B WebDAV auth | User B reaches only User B root |  |  |
-| Cross-user path traversal | Parent-directory and symlink traversal fail |  |  |
-| User A highlights | User B Readest does not receive User A highlights |  |  |
-| Disable User A | User A old WebDAV credentials fail; User B unaffected |  |  |
+| Connect WebDAV | User can enter URL, username, password, and root in Readest |  | Deferred |
+| KOSync still wins | WebDAV does not pull stale progress over KOSync |  | Deferred |
+| Readest notes | Notes/highlights sync between Readest devices only |  | Deferred |
+| User isolation | One user's WebDAV state is invisible to another user |  | Deferred |
 
 ## Family Upload Staging
 
@@ -194,8 +226,8 @@ Target: KEPUB lands within a few pages. Regular EPUB chapter-boundary sync is a 
 |---|---|---|---|
 | Restore Calibre library | OPDS returns canonical fixtures |  |  |
 | Restore KOSync state | KOReader/CrossPoint/Readest progress returns |  |  |
-| Restore Readest WebDAV data | Readest state returns |  |  |
 | Restore sidecar DB and copied library | Optional Kobo/web state returns |  |  |
 | Restore family account registry | Users, statuses, roles, and service usernames return |  |  |
+| Restore family secrets | Setup pages can show existing raw passwords, or rotation is explicit |  |  |
 | Re-run onboarding on fresh VM | Services and config are recreated from repo |  |  |
 | Run users reconcile after restore | Derived auth/config/setup pages are rebuilt from runtime registry |  |  |

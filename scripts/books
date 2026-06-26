@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMMAND="${1:-}"
 
 case "${COMMAND}" in
-  health|web-url|opds-url|proxy-commands)
+  health|verify|web-url|opds-url|kosync-url|proxy-commands|users|requests)
     if [[ ${EUID} -ne 0 && ! -r /etc/books/books.env ]]; then
       exec sudo "$0" "$@"
     fi
@@ -18,12 +18,16 @@ Usage: ./scripts/books COMMAND [ARGS...]
 
 Commands:
   status                 Show service status
-  health                 Check local nginx, calibre, and calibre-web health
-  restart                Restart calibre/calibre-web and reload nginx
+  health                 Check local nginx, calibre, calibre-web, portal, and KOSync health
+  verify [USER]          Run local production checks for routes and per-user auth
+  restart                Restart services and reload nginx
   import [--convert] F   Import EPUB files into calibre
   anna ARGS...           Run Anna's Archive MCP/CLI through the configured env
+  users ARGS...          Manage family users and credentials
+  requests ARGS...       Review book requests
   web-url                Print the owner-only calibre-web URL
   opds-url               Print the OPDS URL for Crosspoint
+  kosync-url             Print the KOSync URL for reading progress
   proxy-commands         Print documented exe.dev share commands
   install-skill          Install/symlink the repo books skill into CODEX_HOME
 EOF
@@ -31,17 +35,80 @@ EOF
 
 case "${COMMAND}" in
   status)
-    systemctl --no-pager --full status books-calibre books-calibre-web nginx
+    systemctl --no-pager --full status books-calibre books-calibre-web books-portal books-kosync nginx
     ;;
   health)
     source /etc/books/books.env
     curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz"
     curl -fsSI -u "${CALIBRE_OPDS_USER}:${CALIBRE_OPDS_PASSWORD}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/opds" | sed -n '1,12p'
-    curl -fsSI -H "X-ExeDev-Email: ${BOOKS_ALLOWED_EMAIL}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/login" | sed -n '1,12p'
+    curl -fsS -H "Accept: application/vnd.koreader.v1+json" "http://127.0.0.1:${BOOKS_PROXY_PORT}/kosync/healthcheck"
+    curl -fsS -H "X-ExeDev-Email: ${BOOKS_ALLOWED_EMAIL}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/" >/dev/null
+    ;;
+  verify)
+    shift || true
+    source /etc/books/books.env
+    user="${1:-}"
+    if [[ -z "${user}" ]]; then
+      user="$(BOOKS_ACCOUNTS_DB="${BOOKS_ACCOUNTS_DB}" python3 - <<'PY'
+import os
+import sqlite3
+
+conn = sqlite3.connect(os.environ["BOOKS_ACCOUNTS_DB"])
+row = conn.execute("select slug from accounts where status='active' order by slug limit 1").fetchone()
+print(row[0] if row else "")
+PY
+)"
+    fi
+    if [[ -z "${user}" ]]; then
+      echo "No active user exists. Create one with ./scripts/books users create \"Name\" --email person@example.com" >&2
+      exit 1
+    fi
+
+    payload="$(/opt/books/bin/books-users show "${user}" --json)"
+    field() {
+      python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1" <<<"${payload}"
+    }
+    setup_user="$(field setup_user)"
+    setup_password="$(field setup_password)"
+    opds_user="$(field opds_user)"
+    opds_password="$(field opds_password)"
+    kosync_user="$(field kosync_user)"
+    kosync_password="$(field kosync_password)"
+    kosync_key="$(printf '%s' "${kosync_password}" | md5sum | awk '{print $1}')"
+
+    printf 'Checking services...\n'
+    systemctl is-active --quiet books-calibre
+    systemctl is-active --quiet books-calibre-web
+    systemctl is-active --quiet books-portal
+    systemctl is-active --quiet books-kosync
+    systemctl is-active --quiet nginx
+
+    printf 'Checking portal and owner gate...\n'
+    curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz" >/dev/null
+    curl -fsS -H "X-ExeDev-Email: ${BOOKS_ALLOWED_EMAIL}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/" >/dev/null
+    public_status="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${BOOKS_PROXY_PORT}/")"
+    [[ "${public_status}" == "302" ]]
+    setup_status="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${BOOKS_PROXY_PORT}/setup/${user}")"
+    [[ "${setup_status}" == "401" ]]
+    curl -fsS -u "${setup_user}:${setup_password}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/setup/${user}" >/dev/null
+
+    printf 'Checking OPDS...\n'
+    curl -fsSI -u "${opds_user}:${opds_password}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/opds" >/dev/null
+
+    printf 'Checking KOSync...\n'
+    curl -fsS -H "Accept: application/vnd.koreader.v1+json" "http://127.0.0.1:${BOOKS_PROXY_PORT}/kosync/healthcheck" >/dev/null
+    curl -fsS -H "Accept: application/vnd.koreader.v1+json" -H "x-auth-user: ${kosync_user}" -H "x-auth-key: ${kosync_key}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/kosync/users/auth" >/dev/null
+
+    printf 'Checking KOSync image pin...\n'
+    docker image inspect "${KOSYNC_IMAGE}" >/dev/null
+
+    printf 'ok: local production checks passed for %s\n' "${user}"
     ;;
   restart)
     sudo systemctl restart books-calibre
     sudo systemctl restart books-calibre-web
+    sudo systemctl restart books-portal
+    sudo systemctl restart books-kosync
     sudo nginx -t
     sudo systemctl reload nginx
     ;;
@@ -53,9 +120,17 @@ case "${COMMAND}" in
     shift
     sudo /opt/books/bin/books-annas "$@"
     ;;
+  users)
+    shift
+    sudo /opt/books/bin/books-users "$@"
+    ;;
+  requests)
+    shift
+    sudo /opt/books/bin/books-users requests "$@"
+    ;;
   web-url)
     source /etc/books/books.env
-    printf 'https://%s/\n' "${BOOKS_PUBLIC_HOST}"
+    printf 'https://%s/calibre/\n' "${BOOKS_PUBLIC_HOST}"
     printf 'username: %s\n' "${CALIBRE_WEB_ADMIN_USER}"
     printf 'password: stored in /etc/books/books.env as CALIBRE_WEB_ADMIN_PASSWORD\n'
     ;;
@@ -64,6 +139,10 @@ case "${COMMAND}" in
     printf 'https://%s/opds\n' "${BOOKS_PUBLIC_HOST}"
     printf 'username: %s\n' "${CALIBRE_OPDS_USER}"
     printf 'password: stored in /etc/books/books.env as CALIBRE_OPDS_PASSWORD\n'
+    ;;
+  kosync-url)
+    source /etc/books/books.env
+    printf 'https://%s/kosync\n' "${BOOKS_PUBLIC_HOST}"
     ;;
   proxy-commands)
     source /etc/books/books.env

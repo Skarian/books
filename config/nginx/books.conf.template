@@ -28,6 +28,16 @@ upstream books_calibre_web {
     keepalive 16;
 }
 
+upstream books_portal {
+    server 127.0.0.1:__BOOKS_PORTAL_PORT__;
+    keepalive 16;
+}
+
+upstream books_kosync {
+    server 127.0.0.1:__KOSYNC_PORT__;
+    keepalive 16;
+}
+
 server {
     listen __BOOKS_PROXY_PORT__;
     server_name _;
@@ -45,7 +55,7 @@ server {
     location = /healthz {
         access_log off;
         add_header Content-Type text/plain;
-        return 200 "ok\n";
+        proxy_pass http://books_portal;
     }
 
     # Crosspoint/OPDS clients can authenticate directly to calibre with Basic auth.
@@ -58,6 +68,18 @@ server {
         proxy_pass http://books_calibre;
     }
 
+    # KOSync clients use /kosync as the base URL and append root-relative API paths.
+    location = /kosync {
+        return 308 /kosync/;
+    }
+
+    location ^~ /kosync/ {
+        rewrite ^/kosync/(.*)$ /$1 break;
+        proxy_set_header X-Forwarded-Prefix /kosync;
+        proxy_ssl_verify off;
+        proxy_pass https://books_kosync;
+    }
+
     location = /favicon.png {
         proxy_pass http://books_calibre;
     }
@@ -67,7 +89,28 @@ server {
         return 404;
     }
 
-    # Browser UI requires exe.dev auth for the owner email before calibre-web sees it.
+    location = /calibre {
+        return 308 /calibre/;
+    }
+
+    # Owner Calibre-Web UI.
+    location ^~ /calibre/ {
+        if ($books_has_exedev_user = 0) {
+            return 302 https://$http_host/__exe.dev/login?redirect=$request_uri;
+        }
+        if ($books_exedev_owner = 0) {
+            return 403;
+        }
+        proxy_set_header X-Script-Name /calibre;
+        proxy_pass http://books_calibre_web/;
+    }
+
+    # Per-user setup pages use their own Basic auth, not exe.dev owner auth.
+    location ^~ /setup/ {
+        proxy_pass http://books_portal;
+    }
+
+    # Owner portal routes.
     location / {
         if ($books_has_exedev_user = 0) {
             return 302 https://$http_host/__exe.dev/login?redirect=$request_uri;
@@ -75,6 +118,6 @@ server {
         if ($books_exedev_owner = 0) {
             return 403;
         }
-        proxy_pass http://books_calibre_web;
+        proxy_pass http://books_portal;
     }
 }

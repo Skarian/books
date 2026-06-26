@@ -2,7 +2,7 @@
 
 Reproducible setup for Neil's self-hosted reading system on `books.exe.xyz`.
 The repo will stand up the shared Calibre bookshelf, cross-device progress sync,
-Readest WebDAV state, family users, and an owner-only admin panel.
+family users, and optional owner admin UI.
 
 The repo is the source of truth. Runtime data and secrets live outside git:
 
@@ -13,7 +13,8 @@ The repo is the source of truth. Runtime data and secrets live outside git:
 - `/srv/books/log`: service logs, not committed
 - `/srv/books/calibre-web`: Calibre-Web settings DB, not committed
 - `/srv/books/kosync`: KOSync state, not committed
-- `/srv/books/readest-webdav`: Readest WebDAV state, not committed
+- `/srv/books/config/accounts.sqlite`: family users and generated service credentials, not committed
+- `/srv/books/requests`: per-user book request queue, not committed
 - `/srv/books/inbox`: staged family uploads, not committed
 
 ## Current implementation
@@ -21,8 +22,12 @@ The repo is the source of truth. Runtime data and secrets live outside git:
 - `nginx` listens on `BOOKS_PROXY_PORT` (`8000` by default) for the exe.dev HTTPS proxy.
 - `calibre-server` listens only on `127.0.0.1:8080`.
 - `calibre-web` listens only on `127.0.0.1:8083` and provides the owner-only web UI/reader.
+- `books-portal` listens only on `127.0.0.1:8090` and provides the owner home page, user setup pages, and request queue.
+- `books-kosync` runs the pinned official KOReader Sync Server image and listens only on `127.0.0.1:7200`.
 - `/opds` and `/get/...` pass through to Calibre so Crosspoint can use Calibre Basic auth.
-- All other browser UI routes require `X-ExeDev-Email: neil.skaria@gmail.com` from exe.dev before they reach Calibre-Web.
+- `/kosync` passes through to KOSync with prefix stripping.
+- `/setup/<user>` reaches the portal and uses per-user Basic auth.
+- `/` is the owner portal and `/calibre/` is the owner Calibre-Web reader. Both require `X-ExeDev-Email: neil.skaria@gmail.com` from exe.dev.
 - Calibre-Web still uses its own username/password login.
 - Calibre-Web Kobo routes are blocked at nginx because Crosspoint uses native Calibre OPDS and Kobo sync is not needed.
 
@@ -32,7 +37,7 @@ This follows the documented exe.dev proxy behavior: the proxy forwards standard 
 
 - `docs/architecture.md`: the repo contract and service shape
 - `docs/device-setup.md`: how CrossPoint, Readest, KOReader, and Kobo connect
-- `docs/family-users.md`: family accounts, setup pages, uploads, and the owner admin panel
+- `docs/family-users.md`: family accounts, setup pages, uploads, and optional owner admin UI
 - `docs/device-sync-test-matrix.md`: the checklist before trusting progress sync
 
 These are background research notes:
@@ -51,10 +56,13 @@ The onboarding command installs:
 
 - official Calibre for Linux pinned by `CALIBRE_VERSION`
 - Calibre-Web pinned by `CALIBRE_WEB_VERSION`
+- official KOReader Sync Server pinned by `KOSYNC_IMAGE`
 - Anna's Archive MCP/CLI `v0.0.5`
 - nginx config from `config/nginx/books.conf.template`
 - systemd unit from `config/systemd/books-calibre.service`
 - systemd unit from `config/systemd/books-calibre-web.service`
+- systemd unit from `config/systemd/books-portal.service`
+- systemd unit from `config/systemd/books-kosync.service`
 - wrappers in `/opt/books/bin`
 - the repo-local Codex `$books` skill symlink
 
@@ -90,7 +98,7 @@ Use the `CALIBRE_OPDS_USER` and `CALIBRE_OPDS_PASSWORD` stored in `/etc/books/bo
 The owner-only web reader is:
 
 ```text
-https://books.exe.xyz/
+https://books.exe.xyz/calibre/
 ```
 
 Use the `CALIBRE_WEB_ADMIN_USER` and `CALIBRE_WEB_ADMIN_PASSWORD` stored in `/etc/books/books.env`.
@@ -100,10 +108,15 @@ Use the `CALIBRE_WEB_ADMIN_USER` and `CALIBRE_WEB_ADMIN_PASSWORD` stored in `/et
 ```bash
 ./scripts/books status
 ./scripts/books health
+./scripts/books verify neil
 ./scripts/books restart
 ./scripts/books web-url
 ./scripts/books opds-url
+./scripts/books kosync-url
 ./scripts/books proxy-commands
+./scripts/books users list
+./scripts/books users rotate neil all
+./scripts/books requests list
 ```
 
 Import EPUBs:
