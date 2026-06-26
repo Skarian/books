@@ -12,6 +12,7 @@ Use the repo helpers from `/home/exedev/books` rather than ad hoc commands:
 - Inspect health with `./scripts/books health` and status with `./scripts/books status`.
 - Run `./scripts/books verify USER` after deployment or auth changes.
 - Import EPUBs with `./scripts/books import /path/to/book.epub`.
+- Generate/import the test EPUB for real-device progress checks with `./scripts/books sync-fixture`.
 - Convert only when needed with `./scripts/books import --convert /path/to/file`.
 - Use Anna's Archive MCP/CLI through `./scripts/books anna ...` after the user's API key is configured.
 - Show Crosspoint setup values with `./scripts/books opds-url`.

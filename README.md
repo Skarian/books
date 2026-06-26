@@ -41,6 +41,7 @@ This follows the documented exe.dev proxy behavior: the proxy forwards standard 
 
 - `docs/architecture.md`: the repo contract and service shape
 - `docs/device-setup.md`: how CrossPoint, Readest, KOReader, and Kobo connect
+- `docs/real-device-sync-test.md`: the physical-device test using a generated EPUB
 - `docs/family-users.md`: family accounts, setup pages, uploads, and optional owner admin UI
 - `docs/device-sync-test-matrix.md`: the checklist before trusting progress sync
 
@@ -130,6 +131,7 @@ Use the `CALIBRE_WEB_ADMIN_USER` and `CALIBRE_WEB_ADMIN_PASSWORD` stored in `/et
 ./scripts/books health
 ./scripts/books verify neil
 ./scripts/books restart
+./scripts/books sync-fixture
 ./scripts/books web-url
 ./scripts/books opds-url
 ./scripts/books kosync-url
@@ -144,6 +146,15 @@ Import EPUBs:
 ```bash
 ./scripts/books import /path/to/book.epub
 ```
+
+Generate and import the test EPUB used for real-device progress checks:
+
+```bash
+./scripts/books sync-fixture
+```
+
+That creates `Books Sync Fixture` under `/srv/books/downloads` and imports it
+into Calibre. Use it with `docs/real-device-sync-test.md`.
 
 Convert a non-EPUB first, then import:
 

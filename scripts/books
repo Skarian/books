@@ -22,6 +22,7 @@ Commands:
   verify [USER]          Run local production checks for routes and per-user auth
   restart                Restart services and reload nginx
   import [--convert] F   Import EPUB files into calibre
+  sync-fixture           Generate and import the Books Sync Fixture EPUB
   anna ARGS...           Run Anna's Archive MCP/CLI through the configured env
   users ARGS...          Manage family users and credentials
   requests ARGS...       Review book requests
@@ -143,6 +144,10 @@ PY
   import)
     shift
     sudo /opt/books/bin/books-import "$@"
+    ;;
+  sync-fixture)
+    shift
+    sudo /opt/books/bin/books-sync-fixture "$@"
     ;;
   anna)
     shift

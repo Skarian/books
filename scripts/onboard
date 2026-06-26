@@ -515,6 +515,7 @@ install_wrappers() {
   install -d -m 0755 "${OPT_BIN}"
   install -m 0755 "${ROOT_DIR}/bin/books-annas" "${OPT_BIN}/books-annas"
   install -m 0755 "${ROOT_DIR}/bin/books-import" "${OPT_BIN}/books-import"
+  install -m 0755 "${ROOT_DIR}/bin/books-sync-fixture" "${OPT_BIN}/books-sync-fixture"
   install -m 0755 "${ROOT_DIR}/bin/books-users" "${OPT_BIN}/books-users"
   install -m 0755 "${ROOT_DIR}/bin/books-portal" "${OPT_BIN}/books-portal"
 }

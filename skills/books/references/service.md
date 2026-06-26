@@ -60,6 +60,16 @@ For non-EPUB files, use conversion only when the user accepts possible quality l
 ./scripts/books import --convert /path/to/book.pdf
 ```
 
+Generate the local real-device sync fixture with:
+
+```bash
+./scripts/books sync-fixture
+```
+
+That writes `/srv/books/downloads/books-sync-fixture.epub` and imports
+`Books Sync Fixture` into Calibre. Use it before filling in
+`docs/device-sync-test-matrix.md`.
+
 ## Anna's Archive MCP/CLI
 
 The installed binary is `/opt/books/bin/annas-mcp`, wrapped by `/opt/books/bin/books-annas` and exposed as:

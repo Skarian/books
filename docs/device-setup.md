@@ -71,6 +71,16 @@ dashboard.
 Do not turn on Readest WebDAV during the first pilot. It is not needed for book
 downloads or progress sync, and it can introduce a second progress path.
 
+After setup, test with `Books Sync Fixture`. Neil can add it with:
+
+```bash
+./scripts/books sync-fixture
+```
+
+Open the fixture on one device, go to `Sync marker three`, then open the same
+fixture on another device. If the second device lands near that marker, the core
+sync path is working.
+
 ## KOReader
 
 Use KOReader anywhere it is available and pleasant to read on. It is also the
