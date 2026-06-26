@@ -2,255 +2,227 @@
 
 Research date: June 26, 2026 UTC.
 
-## Hard Constraint
+## Decision
 
-No paid service and no non-self-hosted service can be part of the target architecture. Commercial/cloud readers are useful comparators only. They are rejected here because they move the library or progress sync into someone else's custody.
+The recommended architecture is viable enough to implement and test:
 
-The repo remains the source of truth for installs, service definitions, proxy config, docs, and operational commands. Runtime books, secrets, databases, WebDAV state, and sync state remain outside git and must be backed up separately.
+1. Keep Calibre as the canonical EPUB library, OPDS catalog, and download source.
+2. Add official KOReader Sync Server (`koreader/kosync`) as the single cross-app progress lane at `https://books.exe.xyz/kosync`.
+3. Use that same KOSync endpoint from CrossPoint, KOReader, and Readest.
+4. Add a self-hosted WebDAV endpoint only for Readest-to-Readest richer state: progress backup, highlights, notes, covers, and optional book files.
+5. Treat stock Kobo support as optional sidecar work. Use KOReader on Kobo if unified progress matters more than the stock Kobo UI.
 
-## User Need
+This changes the earlier framing. Readest is not just a separate WebDAV lane: current Readest can directly talk to a KOReader-compatible sync server for progress. That makes a self-hosted, no-paid, no-cloud-custody progress plane plausible across XTEink CrossPoint, KOReader devices, Android, iPad, macOS, and Windows.
 
-Primary need: a book setup that makes reading pleasant across:
+## Hard Constraints
 
-- XTEink X4 with CrossPoint
-- Kobo reader
-- Android
-- iPad
-- MacBook
-- Windows PC
-- KOReader
+- No paid service in the core path.
+- No non-self-hosted progress service or hosted library custody.
+- Runtime secrets, books, sync databases, and WebDAV state stay outside git.
+- All install/config/proxy/service changes must be represented in this repo.
+- Kobo stock reader is optional; Kobo with KOReader remains in scope.
 
-Most important criterion: progress sync across devices. OPDS alone is catalog/download. A system that serves books but cannot keep position synced is not enough.
+## Target Devices
+
+| Device | Primary app | Progress sync path | Status |
+|---|---|---|---|
+| XTEink X4 | CrossPoint | KOSync | Accept, device validation required |
+| KOReader-capable devices | KOReader | KOSync | Accept |
+| Android | Readest | KOSync for cross-app progress; WebDAV for Readest state | Accept |
+| iPad | Readest | KOSync for cross-app progress; WebDAV for Readest state | Accept |
+| MacBook | Readest | KOSync for cross-app progress; WebDAV for Readest state | Accept |
+| Windows PC | Readest | KOSync for cross-app progress; WebDAV for Readest state | Accept |
+| Kobo stock reader | Stock Kobo | Sidecar server only | Optional pilot |
 
-## Current Baseline
+## Architecture
 
-Current repo runs:
+```text
+Calibre library
+  -> OPDS/downloads at /opds and /get/...
+  -> identical EPUB bytes on every client
 
-- Calibre content server for canonical OPDS and downloads.
-- Calibre-Web for owner-only web UI/reader.
-- nginx gate for exe.dev auth on browser UI.
-- CrossPoint-friendly `/opds` and `/get/...` paths.
+Official KOReader Sync Server
+  -> /kosync
+  -> progress only
+  -> CrossPoint, KOReader, Readest
 
-This is a solid delivery baseline. It is not a complete progress-sync architecture yet.
+Self-hosted WebDAV
+  -> /dav/readest
+  -> Readest progress backup, highlights, notes, covers, optional files
+  -> Readest clients only
+```
+
+KOSync is the canonical cross-app progress lane. WebDAV is not the bridge to CrossPoint or KOReader; it is Readest's richer self-hosted state lane.
 
-## Consensus Architecture
+## Why This Works
 
-Do not migrate production away from Calibre yet. Keep Calibre as the canonical library and add two small, reversible sync sidecars first:
+Readest's current docs describe a direct Readest-to-KOReader Sync Server mode. It is progress-only, needs Readest 0.10.1+, and uses the same server URL, username, password, and file-content checksum approach as KOReader binary matching.
 
-1. `books-kosync`: self-hosted KOReader-compatible sync endpoint at `https://books.exe.xyz/kosync`.
-2. `books-webdav`: self-hosted WebDAV endpoint for Readest state at `https://books.exe.xyz/dav/readest`.
+CrossPoint's user guide says it can sync reading progress with KOReader-compatible sync servers and interoperate with KOReader when the same server and credentials are used. CrossPoint's current source also implements the KOReader API endpoints, MD5-based auth headers, binary partial-MD5 document matching, and a progress payload containing both `progress` and `percentage`.
 
-Then run isolated sidecar pilots, on copied EPUBs only, for stock Kobo/native-server workflows:
+KOReader's own plugin uses the same progress shape: a document digest, a progress string, a percentage, device metadata, and a timestamp. For reflowable EPUBs, KOReader uses XPointer-like positions; for binary document matching, it uses a partial MD5 of the file.
 
-1. BookOrbit first.
-2. Komga second.
-3. Grimmory third if the BookLore-lineage path still looks useful.
+The official KOReader Sync Server is the lowest-risk server because it is the protocol source. It persists Redis data, exposes the expected endpoints, has a current 2026 release, and supports the reverse-proxy port intended for TLS termination.
 
-Do not point any pilot at `/srv/books/library` with write access. Calibre owns that tree until a replacement proves itself with real devices and backup/restore.
+## What Does Not Sync
 
-## Key Findings
+The shared KOSync lane only syncs reading position. It does not sync:
 
-### OPDS Is Not Progress Sync
+- highlights
+- notes
+- bookmarks
+- book files
+- collections
+- ratings
+- reading sessions
 
-OPDS is useful for browsing and acquiring books. It does not make arbitrary readers share progress. Any architecture must choose a sync layer separately.
+Readest WebDAV can cover Readest-to-Readest highlights, notes, covers, and optional book-file sync. It will not make those objects appear in CrossPoint or KOReader.
 
-### KOReader Sync Is The Main Open Progress Primitive
+## Precision Expectations
 
-KOReader sync is real, self-hostable, and CrossPoint exposes KOReader-compatible sync settings.
+| Path | Expected precision | Why |
+|---|---|---|
+| KOReader to KOReader | Best | Same app, same KOSync protocol, same XPointer model |
+| Readest to KOReader | Good, test required | Readest converts between its local CFI/location model and KOReader-style XPointer/percentage |
+| KOReader to Readest | Good, test required | Same conversion risk in the other direction |
+| CrossPoint to KOReader/Readest | Practical but approximate | CrossPoint maps between its page/chapter state and KOReader-style progress |
+| KOReader/Readest to CrossPoint | Practical but approximate | CrossPoint lands on its local page model after resolving remote progress |
 
-The safe strategy is:
+CrossPoint is the risk. Current CrossPoint source is better than a simple chapter-only mapper: it has ancestry-aware XPath parsing, visible-character progress mapping, paragraph/list-item/anchor refinement, and binary document matching. Still, the X4 must be tested with real EPUBs because layout, fonts, CSS, and page cache behavior can move the landing point.
 
-- Use a pinned self-hosted KOReader sync server.
-- Use binary/file-content document matching, not filename matching.
-- Preserve one canonical EPUB byte stream per book.
-- Add import and proxy probes before calling the lane reliable.
+## EPUB Identity Rule
 
-Filename matching is too fragile because it can collide across editions and can break when a downloader changes names. Binary matching is stricter, but it forces us to control EPUB bytes. That is the right tradeoff for reproducible sync.
+KOSync binary matching only works if the clients compute the same document digest. The repo should enforce this as an operational rule:
 
-### CrossPoint Sync Will Be Approximate
+- Calibre owns `/srv/books/library`.
+- Devices download the same canonical EPUB bytes from Calibre OPDS where possible.
+- Readest uses `File Content`.
+- KOReader uses `Binary`.
+- CrossPoint uses the same sync server and should be set to binary matching once available in the device UI.
+- Do not convert, optimize, metadata-rewrite, or re-zip a book after it enters the canonical library without treating it as a new sync identity.
 
-CrossPoint can use KOReader-compatible sync servers, but its internal reader model is not identical to KOReader. KOReader stores an XPath-like progress string plus percentage. CrossPoint stores a more constrained page/chapter model and maps between them.
+This is the main failure mode. Filename matching is easier but too weak for editions, renamed downloads, and duplicate titles.
 
-Realistic target:
-
-- KOReader-to-KOReader: paragraph/semantic-location quality if EPUB bytes match.
-- CrossPoint-to-KOReader or KOReader-to-CrossPoint: usually near the right paragraph or chapter, with documented outliers.
-
-This is still worth testing because it is the best self-hosted path for the XTEink X4.
-
-### Readest Is A Mainstream Client Lane, Not The Server
-
-Readest is attractive for Android, iPad, macOS, Windows, Linux, and web. The self-hosted path that currently fits this project is WebDAV sync:
-
-- No Readest account required.
-- Syncs reading progress, location, highlights, and notes.
-- Can optionally sync book files.
-- Can import from our existing Calibre OPDS catalog.
-
-Do not run the full self-hosted Readest/Supabase stack first. It is heavier operationally, and Readest's desktop/mobile apps still have an open issue for choosing a custom backend endpoint. Use WebDAV first.
-
-### Stock Kobo Is A Separate Lane
-
-Plain sideloaded EPUBs or OPDS downloads on stock Kobo do not create a general self-hosted progress sync story. Stock Kobo sync requires Kobo API emulation from a server such as BookOrbit, Komga, Grimmory, BookLore, or Calibre-Web variants.
-
-Even then, progress precision can be limited:
-
-- Regular EPUB on Kobo may only sync at chapter boundaries.
-- KEPUB can be better, but server mappings can still be off by a few pages.
-
-Use KOReader on Kobo if exact self-hosted progress matters more than the stock Kobo reader UI.
-
-### BookOrbit Is The Best New Sidecar Pilot
-
-BookOrbit is the strongest new candidate for a Kobo/KOReader/web sidecar pilot because it directly targets:
-
-- Self-hosted Docker deployment.
-- No required cloud account.
-- Private OPDS at `/api/v1/opds`.
-- Kobo device sync.
-- KOReader plugin-based sync.
-- Per-user progress.
-- Web reader.
-
-However, it is still a pilot, not the new source of truth. An open BookOrbit issue from June 14, 2026 asks for seamless three-way progress, annotation, and session sync across KOReader, Kobo, and BookOrbit. That is a signal to test carefully before trusting it for the whole device matrix.
-
-### Komga Is Mature, But Sidecar-Only For Now
-
-Komga has strong documentation and a real self-hosted surface:
-
-- OPDS v1/v2.
-- Web reader.
-- Kobo native sync.
-- KOReader sync.
-- Multi-user access and library management.
-
-Risks:
-
-- Regular EPUB progress can degrade to chapter-level for Kobo/KOReader transitions.
-- Kobo sync uses API-key URLs and reverse-proxy details matter.
-- CrossPoint OPDS compatibility must be tested on the actual device.
-- Calibre metadata/progress does not migrate cleanly.
-
-Komga is a serious sidecar pilot, not a replacement yet.
-
-### BookLore Is Blocked; Grimmory Is Pilot-Only
-
-BookLore technically matches much of the desired feature list, but it has too much recent governance risk for a new production deployment. Treat upstream BookLore as blocked.
-
-Grimmory is the community successor/fork and appears more credible than BookLore now. It has active releases and clearer governance, but it still inherits the BookLore architecture and is still settling. Pilot it only after BookOrbit and Komga.
-
-### Calibre-Web-Automated Is Incremental
-
-Calibre-Web-Automated can improve ingest/conversion and has sync-adjacent features. It does not prove a complete self-hosted progress-sync story across CrossPoint, stock Kobo, KOReader, Readest, iPad, Android, Mac, and Windows.
-
-Use it only if its automation helps the existing Calibre path. Do not treat it as the sync answer.
-
-## Rejected
-
-- BookFusion: good sync story, but paid/cloud.
-- Google Play Books: cloud custody, no OPDS/Kobo/KOReader/CrossPoint path.
-- Apple Books: Apple-only and cloud-dependent.
-- Kindle/Send-to-Kindle: Amazon custody and not open/self-hosted.
-- Readwise Reader: paid/cloud, not a self-hosted library server.
-- OPDS-only clients: useful for download, insufficient for progress sync.
-- Shelfmark/Shelfarr-style acquisition dashboards as primary reader servers: possible ingest adjuncts only, and only for legally authorized/public-domain/owned content.
-
-## Pilot Order
-
-Use the same canonical EPUB fixture set for every test.
-
-1. Canonical EPUB fixture:
-   - Choose three legally owned/public-domain EPUBs.
-   - Record raw SHA256.
-   - Record a normalized EPUB member hash.
-   - Verify Calibre OPDS `/get/...` downloads match the canonical file or document any deterministic change.
-
-2. KOSync pilot:
-   - Add a pinned KOReader sync service.
-   - Persist sync state outside git.
-   - Create a sync-only user, then disable open registration.
-   - Test health, auth, PUT/GET progress, restart persistence, and public nginx path routing.
-   - Test CrossPoint, Kobo KOReader, Android KOReader, and desktop KOReader with binary matching.
-
-3. Readest WebDAV pilot:
-   - Add `rclone serve webdav` or another full WebDAV server on localhost.
-   - Proxy it at `/dav/readest`.
-   - Use it only for Readest sync state/covers/annotations and optional book files.
-   - Test iPad, Android, MacBook, and Windows with no Readest cloud account.
-
-4. BookOrbit sidecar:
-   - Run pinned `ghcr.io/bookorbit/bookorbit:1.12.0` or exact digest.
-   - Use a copied fixture library and separate PostgreSQL volume.
-   - Test OPDS, web reader, KOReader plugin sync, and stock Kobo sync.
-   - Keep only if three-way progress behavior is good enough in practice.
-
-5. Komga sidecar:
-   - Run a pinned Komga image or jar.
-   - Use copied fixture books.
-   - Test CrossPoint OPDS, KOReader sync, stock Kobo sync, and web reader.
-   - Treat chapter-level EPUB progress as a limited pass only if acceptable.
-
-6. Grimmory sidecar:
-   - Run pinned `v3.2.2` or exact digest.
-   - Use copied fixture books only.
-   - Repeat OPDS, KOReader, Kobo, web reader, and backup/restore tests.
-
-## Repo Work Needed
-
-Likely files for the next implementation pass:
-
-- `config/systemd/books-webdav.service`
-- `config/systemd/books-kosync.service` or `config/compose/kosync.yml`
-- optional `config/compose/bookorbit.yml`
-- optional `config/compose/komga.yml`
-- optional `config/compose/grimmory.yml`
-- nginx routes for `/dav/readest`, `/kosync`, and optional sidecar paths
-- env additions in `config/books.env.example` for ports, data dirs, credentials, and pinned versions
-- `bin/books-hash` for raw SHA256 and normalized EPUB member hashes
-- `bin/books-sync-probe` for health checks and fixture download/hash verification
-- `docs/device-sync-test-matrix.md` for device/app/version/results
+## Candidate Matrix
+
+| Candidate | Verdict | Notes |
+|---|---:|---|
+| Calibre + official KOSync + Readest + WebDAV | Accept | Best match for all required non-stock-Kobo devices with no paid/cloud progress service. |
+| Official `koreader/kosync` | Accept | Primary KOSync server. Pin the image/version and persist Redis outside git. |
+| `kosync-dotnet` | Fallback | Good admin API and registration controls, but not the protocol source and has first-pull compatibility risk to test. |
+| Readest | Accept | Best mainstream client across iPad, Android, macOS, Windows, Linux, and web; has OPDS/Calibre and direct KOSync support. |
+| Readest WebDAV | Accept as Readest lane | Self-hosted and useful, but not a bridge to CrossPoint/KOReader. |
+| KOReader | Accept where available | Strongest open progress primitive, but no iOS/iPadOS app. |
+| CrossPoint | Accept with validation | It implements KOReader-compatible sync, but landing precision must be measured on the X4. |
+| Everbound | Watch | Promising open mobile reader with KOSync and WebDAV, but not ready to cover desktop/web as the primary lane. |
+| BookOrbit | Sidecar pilot | Strong self-hosted Kobo/web/KOReader candidate, but tied to its own library identity and plugin. Do not replace standalone KOSync yet. |
+| Komga | Sidecar pilot | Mature OPDS/Kobo/KOReader server. Regular EPUB progress can degrade to chapter boundaries. |
+| Grimmory | Late pilot | Interesting BookLore-lineage project; still young and should not become the core lane first. |
+| BookLore | Block | Feature list is attractive, but project churn/governance risk is too high for production. |
+| Calibre-Web-Automated | Revise | Useful ingest/conversion adjunct; not the universal progress plane. |
+| Kavita | Revise | Useful web/OPDS server, but stock Kobo and KOReader progress behavior do not beat the recommended core. |
+| Stump | Revise | Interesting, but current sync/migration risks make it a later pilot. |
+| Moon+ Reader | Block for core | Android-only; WebDAV sync is not a CrossPoint/KOReader bridge. |
+| Thorium/Foliate/Librera/Yomu/KyBook/PocketBook/FBReader | Block for core | Platform gaps, hosted sync, paid sync, or no KOSync-compatible progress path. |
+
+## Implementation Plan
+
+### Phase 1: Fixture Identity
+
+- Pick three legally owned, public-domain, or otherwise authorized EPUBs.
+- Record raw SHA256 and KOReader partial-MD5-style identity.
+- Verify Calibre OPDS downloads preserve bytes.
+- Add a repo probe that downloads `/get/...` and compares fixture hashes.
+
+### Phase 2: Official KOSync
+
+- Add a pinned official `koreader/kosync` service.
+- Store Redis state under `/srv/books/kosync`.
+- Expose it publicly at `/kosync` without exe.dev owner-header gating.
+- Use KOSync credentials, not Calibre/exe.dev auth, for this path.
+- Bootstrap with registration enabled, create a sync-only user, then restart with registration disabled.
+- Add health/auth/progress probes to `scripts/books`.
+
+### Phase 3: Readest
+
+- Configure Readest on Android, iPad, macOS, and Windows.
+- Add Calibre OPDS with Basic auth.
+- Configure KOReader Sync in Readest against `https://books.exe.xyz/kosync`.
+- Set checksum/document matching to file content.
+- Configure WebDAV at `https://books.exe.xyz/dav/readest` only after KOSync progress is verified.
+- Use WebDAV for Readest state and optional book files; do not rely on it for CrossPoint/KOReader.
+
+### Phase 4: CrossPoint And KOReader
+
+- Configure CrossPoint to the same KOSync endpoint and sync-only user.
+- Configure KOReader to the same endpoint and binary matching.
+- Download the same fixture EPUBs from Calibre OPDS.
+- Test push and pull in every direction that matters.
+
+### Phase 5: Optional Kobo/Server Sidecars
+
+- Only after the core lane passes, run BookOrbit and Komga against copied fixture libraries.
+- Do not grant sidecars write access to `/srv/books/library`.
+- Keep a sidecar only if it proves backup/restore, file identity, Kobo precision, and CrossPoint/KOReader non-interference.
 
 ## Acceptance Criteria
 
-Do not migrate until these pass:
+The architecture passes only if:
 
-- OPDS downloads from each test client produce the same canonical EPUB bytes or a known deterministic equivalent.
+- CrossPoint can authenticate to `https://books.exe.xyz/kosync`.
+- CrossPoint can upload local progress for a fixture EPUB and another client can pull it.
+- CrossPoint can apply remote progress from KOReader or Readest and land close enough to continue reading without hunting.
+- KOReader on at least one non-X4 device can push and pull the same fixture through KOSync with binary matching.
+- Readest on iPad, Android, macOS, and Windows can push and pull progress through KOSync using file-content matching.
+- Readest WebDAV syncs highlights/notes/progress between Readest clients without a Readest cloud account.
 - KOSync survives service restart and VM reboot.
-- CrossPoint can authenticate and sync through `https://books.exe.xyz/kosync`.
-- KOReader clients on Kobo, Android, and desktop can push/pull progress through the same self-hosted server.
-- Readest on iPad, Android, Mac, and Windows syncs progress and annotations through WebDAV without a Readest cloud account.
-- Stock Kobo sidecar sync, if kept, lands within a few pages for KEPUB and has clearly documented limits for EPUB.
-- Backup/restore covers `/srv/books/library`, `/srv/books/readest-webdav`, sync server state, and sidecar databases.
+- Backup/restore covers `/srv/books/library`, `/srv/books/kosync`, `/srv/books/readest-webdav`, and any sidecar databases.
+- A failed hash match is visible in probes or the test matrix before a user trusts the setup.
 
-## Working Hypothesis
+If CrossPoint lands only at chapter starts for normal EPUBs, the architecture is a limited pass only if that is acceptable for X4 reading. If Readest and KOReader cannot share a binary/file-content identity from Calibre OPDS downloads, the architecture is blocked until import/download identity is fixed.
 
-The best self-hosted architecture is not one app:
+## Repo Work Needed
 
-- Calibre remains the canonical import/library/OPDS layer.
-- KOSync becomes the e-ink/CrossPoint/KOReader progress lane.
-- Readest plus self-hosted WebDAV becomes the mainstream tablet/desktop lane.
-- BookOrbit or Komga may become a Kobo sidecar if stock Kobo sync matters enough and passes real-device tests.
+- `config/systemd/books-kosync.service` or `config/compose/kosync.yml`
+- `config/systemd/books-webdav.service`
+- nginx route for `/kosync` with prefix stripping and no exe.dev owner gate
+- nginx route for `/dav/readest` with WebDAV auth
+- `config/books.env.example` additions for ports, image tags/digests, paths, and bootstrap-only credentials
+- `scripts/onboard` KOSync bootstrap and WebDAV setup
+- `scripts/books kosync-health`, `kosync-auth`, and fixture progress probes
+- `bin/books-hash` or equivalent for raw SHA256 plus KOReader-style partial MD5 checks
+- updated backup/restore docs for KOSync Redis and Readest WebDAV state
 
-Do not build a broad custom progress bridge yet. CFI, KOReader XPointer, Kobo/KEPUB progress, Readest metadata matching, and CrossPoint page models are different enough that a bridge would be fragile without a large fixture suite.
+## Notes For Future Custom Utilities
+
+Do not build a broad progress bridge yet. Readest already has a direct KOSync client, and a custom bridge would become a second writer with weak conflict semantics.
+
+Safe future utilities:
+
+- fixture hash verifier
+- OPDS download identity checker
+- KOSync progress inspector
+- backup integrity checker
+- dashboard/reporting from KOSync into Calibre custom columns
+
+Avoid:
+
+- bidirectional Readest WebDAV to KOSync sync
+- KOSync to Calibre position synthesis
+- automatic progress writes from multiple sources without explicit timestamps and conflict policy
 
 ## Sources
 
-- CrossPoint user guide: https://github.com/crosspoint-reader/crosspoint-reader/blob/master/USER_GUIDE.md
-- CrossPoint KOReader sync discussion: https://github.com/crosspoint-reader/crosspoint-reader/discussions/61
-- KOReader sync server: https://github.com/koreader/koreader-sync-server
 - Readest sync docs: https://readest.com/docs/sync
+- Readest KOReader sync wiki: https://github.com/readest/readest/wiki/Sync-with-Koreader-devices
+- Readest repository: https://github.com/readest/readest
 - Readest library/OPDS docs: https://readest.com/docs/library
-- Readest custom backend issue: https://github.com/readest/readest/issues/1168
-- Readest releases: https://github.com/readest/readest/releases
-- Komga Kobo docs: https://komga.org/docs/guides/kobo/
-- Komga KOReader docs: https://komga.org/docs/guides/koreader/
-- Komga OPDS docs: https://komga.org/docs/guides/opds/
+- CrossPoint user guide: https://github.com/crosspoint-reader/crosspoint-reader/blob/master/USER_GUIDE.md
+- CrossPoint source reviewed locally at commit `7271c00`.
+- KOReader source reviewed locally at commit `49caca9`.
+- KOReader sync server: https://github.com/koreader/koreader-sync-server
+- `kosync-dotnet`: https://github.com/jberlyn/kosync-dotnet
 - BookOrbit overview: https://bookorbit.app/what-is-bookorbit
-- BookOrbit OPDS docs: https://bookorbit.app/opds.html
-- BookOrbit Kobo docs: https://bookorbit.app/kobo.html
 - BookOrbit KOReader docs: https://bookorbit.app/koreader.html
-- BookOrbit releases: https://github.com/bookorbit/bookorbit/releases
-- BookOrbit three-way sync issue: https://github.com/bookorbit/bookorbit/issues/337
-- Grimmory KOReader docs: https://grimmory.org/docs/integration/koreader
-- Grimmory releases: https://github.com/grimmory-tools/grimmory/releases
-- BookLore releases: https://github.com/booklore-app/booklore/releases
+- Komga KOReader docs: https://komga.org/docs/guides/koreader/
+- Everbound repository: https://github.com/Neighborhood-Nerd/everbound-ereader-app
