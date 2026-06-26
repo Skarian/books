@@ -74,9 +74,12 @@ PY
     setup_password="$(field setup_password)"
     opds_user="$(field opds_user)"
     opds_password="$(field opds_password)"
+    readest_email="$(field readest_email)"
+    readest_password="$(field readest_password)"
     kosync_user="$(field kosync_user)"
     kosync_password="$(field kosync_password)"
     kosync_key="$(printf '%s' "${kosync_password}" | md5sum | awk '{print $1}')"
+    kosync_verify_doc="0123456789abcdef0123456789abcdef"
 
     printf 'Checking services...\n'
     systemctl is-active --quiet books-calibre
@@ -103,6 +106,11 @@ PY
     curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/runtime-config.js" | grep -q "SUPABASE\\|READEST_RUNTIME_CONFIG"
     curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/library" >/dev/null
     curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/auth/v1/health" >/dev/null
+    readest_login="$(curl -fsS -X POST "http://127.0.0.1:${BOOKS_PROXY_PORT}/auth/v1/token?grant_type=password" \
+      -H "apikey: ${READEST_ANON_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "{\"email\":\"${readest_email}\",\"password\":\"${readest_password}\"}")"
+    python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["user"]["email"] == sys.argv[1]; assert data["access_token"]' "${readest_email}" <<<"${readest_login}"
 
     printf 'Checking KOSync...\n'
     curl -fsS -H "Accept: application/vnd.koreader.v1+json" "http://127.0.0.1:${BOOKS_PROXY_PORT}/kosync/healthcheck" >/dev/null
@@ -110,6 +118,13 @@ PY
     curl -fsS -X POST -H "Content-Type: application/json" \
       -d "{\"serverUrl\":\"https://${BOOKS_PUBLIC_HOST}/kosync\",\"endpoint\":\"/users/auth\",\"method\":\"GET\",\"headers\":{\"X-Auth-User\":\"${kosync_user}\",\"X-Auth-Key\":\"${kosync_key}\"}}" \
       "http://127.0.0.1:${BOOKS_PROXY_PORT}/api/kosync" >/dev/null
+    curl -fsS -X POST -H "Content-Type: application/json" \
+      -d "{\"serverUrl\":\"https://${BOOKS_PUBLIC_HOST}/kosync\",\"endpoint\":\"/syncs/progress\",\"method\":\"PUT\",\"headers\":{\"X-Auth-User\":\"${kosync_user}\",\"X-Auth-Key\":\"${kosync_key}\"},\"body\":{\"document\":\"${kosync_verify_doc}\",\"progress\":\"/body/DocFragment[1]/p[1]\",\"percentage\":0.42,\"device\":\"books-verify\",\"device_id\":\"books-verify\"}}" \
+      "http://127.0.0.1:${BOOKS_PROXY_PORT}/api/kosync" >/dev/null
+    kosync_progress="$(curl -fsS -X POST -H "Content-Type: application/json" \
+      -d "{\"serverUrl\":\"https://${BOOKS_PUBLIC_HOST}/kosync\",\"endpoint\":\"/syncs/progress/${kosync_verify_doc}\",\"method\":\"GET\",\"headers\":{\"X-Auth-User\":\"${kosync_user}\",\"X-Auth-Key\":\"${kosync_key}\"}}" \
+      "http://127.0.0.1:${BOOKS_PROXY_PORT}/api/kosync")"
+    python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["document"] == sys.argv[1]; assert abs(float(data["percentage"]) - 0.42) < 0.001' "${kosync_verify_doc}" <<<"${kosync_progress}"
 
     printf 'Checking KOSync image pin...\n'
     docker image inspect "${KOSYNC_IMAGE}" >/dev/null

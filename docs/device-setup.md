@@ -48,20 +48,25 @@ Use Readest on the general-purpose devices.
 
 1. Open `https://books.exe.xyz/library`.
 2. Sign in with the reader's Readest email and password.
-3. Add the Calibre/OPDS library at `https://books.exe.xyz/catalog`.
-4. Sign in to the catalog with the reader's OPDS username and password.
-5. Download the book from the OPDS catalog.
-6. In sync settings, choose KOReader Sync.
-7. Use `https://books.exe.xyz/kosync`.
-8. Sign in with the reader's KOSync username and password.
-9. Set document matching to file content.
+3. Open Settings, then Integrations.
+4. Under Content Sources, open OPDS Catalogs.
+5. Tap Add Catalog.
+6. Add the Calibre/OPDS library at `https://books.exe.xyz/catalog`.
+7. Sign in to the catalog with the reader's OPDS username and password.
+8. Download the book from the OPDS catalog.
+9. Open Settings, then Integrations again.
+10. Under Reading Sync, open KOReader Sync.
+11. Use `https://books.exe.xyz/kosync`.
+12. Sign in with the reader's KOSync username and password.
+13. After it connects, leave Checksum Method set to File Content.
 
 Do not enter `/api`, `/v1`, or `/healthcheck` after the KOSync URL. The URL is
 exactly `https://books.exe.xyz/kosync`.
 
-Readest exposes OPDS Catalogs and KOReader Sync as normal app settings. Each
-person enters their own KOSync credentials in the KOReader Sync form. That is
-user-accessible inside the app; it does not require an admin dashboard.
+Readest exposes OPDS Catalogs and KOReader Sync under Settings, then
+Integrations. Each person enters their own KOSync credentials in the KOReader
+Sync form. That is user-accessible inside the app; it does not require an admin
+dashboard.
 
 Do not turn on Readest WebDAV during the first pilot. It is not needed for book
 downloads or progress sync, and it can introduce a second progress path.

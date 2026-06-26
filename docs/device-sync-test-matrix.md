@@ -78,6 +78,8 @@ Pass only if downloaded EPUB bytes match the canonical fixture. If a client rewr
 | Public healthcheck | `https://books.exe.xyz/kosync/healthcheck` returns healthy JSON |  |  |
 | Prefix-strip healthcheck | `/kosync/healthcheck` reaches upstream `/healthcheck` |  |  |
 | Prefix-strip auth | `/kosync/users/auth` reaches upstream `/users/auth` |  |  |
+| Readest bridge auth | `/api/kosync` can authenticate against `/users/auth` for this service only |  |  |
+| Readest bridge progress | `/api/kosync` can PUT and GET progress for a hex document id |  |  |
 | Client base URL | Clients use `https://books.exe.xyz/kosync`, not `/api`, `/v1`, or `/healthcheck` |  |  |
 | Registration bootstrap | Sync-only user can be created during onboarding |  |  |
 | Registration locked | New public registration fails after bootstrap |  |  |
@@ -121,6 +123,7 @@ Readest passes only if a normal user can configure these without owner access.
 | Readest login | Sign in | Readest email/pass | User can reach `/library` and sign in |  |  |
 | OPDS Catalogs | OPDS Catalogs | OPDS user/pass | Calibre catalog opens and downloads EPUB from `/catalog` |  |  |
 | KOReader Sync | KOReader Sync | KOSync user/pass | Strategy chosen for progress lane; checksum File Content |  |  |
+| Readest Web progress | KOReader Sync | KOSync user/pass | Browser app can push and pull progress through `/api/kosync` |  |  |
 
 ## Family Account Lifecycle
 
