@@ -3,7 +3,7 @@
 Research date: June 26, 2026 UTC.
 
 This is the planning record behind the family-user docs. For the shorter working
-version, read `docs/family-users.md`.
+version, read `../family-users.md`.
 
 ## Verdict
 

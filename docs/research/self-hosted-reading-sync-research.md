@@ -3,7 +3,7 @@
 Research date: June 26, 2026 UTC.
 
 This is background research. For the working service docs, start with
-`docs/architecture.md`, `docs/device-setup.md`, and `docs/family-users.md`.
+`../architecture.md`, `../device-setup.md`, and `../family-users.md`.
 
 ## Decision
 
@@ -17,7 +17,7 @@ The recommended architecture is viable enough to implement and test:
 
 This changes the earlier framing. Readest is not just a separate WebDAV lane: current Readest can directly talk to a KOReader-compatible sync server for progress. That makes a self-hosted, no-paid, no-cloud-custody progress plane plausible across XTEink CrossPoint, KOReader devices, Android, iPad, macOS, and Windows.
 
-Family/multi-user support is viable only with the constraints in `docs/family-multi-user-admin-plan.md`: shared books are fine, but OPDS credentials, KOSync progress, WebDAV roots, setup pages, and upload permissions must be per-user.
+Family/multi-user support is viable only with the constraints in `family-multi-user-admin-plan.md`: shared books are fine, but OPDS credentials, KOSync progress, WebDAV roots, setup pages, and upload permissions must be per-user.
 
 ## Hard Constraints
 
@@ -249,4 +249,4 @@ Avoid:
 - BookOrbit KOReader docs: https://bookorbit.app/koreader.html
 - Komga KOReader docs: https://komga.org/docs/guides/koreader/
 - Everbound repository: https://github.com/Neighborhood-Nerd/everbound-ereader-app
-- Family multi-user admin plan: docs/family-multi-user-admin-plan.md
+- Family multi-user admin plan: family-multi-user-admin-plan.md

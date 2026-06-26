@@ -37,8 +37,8 @@ This follows the documented exe.dev proxy behavior: the proxy forwards standard 
 
 These are background research notes:
 
-- `docs/self-hosted-reading-sync-research.md`
-- `docs/family-multi-user-admin-plan.md`
+- `docs/research/self-hosted-reading-sync-research.md`
+- `docs/research/family-multi-user-admin-plan.md`
 
 ## Onboard A Fresh VM
 

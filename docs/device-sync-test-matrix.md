@@ -1,6 +1,6 @@
 # Device Sync Test Matrix
 
-Use this matrix to validate the recommendation in `docs/self-hosted-reading-sync-research.md`.
+Use this matrix to validate the recommendation in `docs/research/self-hosted-reading-sync-research.md`.
 
 Test date:
 Tester:
@@ -80,7 +80,7 @@ Pass only if downloaded EPUB bytes match the canonical fixture. If a client rewr
 
 ## Family Account Lifecycle
 
-Use this section before enabling family access. It validates `docs/family-multi-user-admin-plan.md`.
+Use this section before enabling family access. It validates `docs/research/family-multi-user-admin-plan.md`.
 
 | Test | Expected | Pass | Notes |
 |---|---|---|---|

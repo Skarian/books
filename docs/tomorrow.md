@@ -3,7 +3,7 @@
 - Evaluate progress-sync alternatives to the current Calibre/nginx setup.
 - Keep the target self-hosted and unpaid; reject cloud-custody sync services.
 - Start from the repo-contract docs: `docs/architecture.md`, `docs/device-setup.md`, and `docs/family-users.md`.
-- Use `docs/self-hosted-reading-sync-research.md` and `docs/family-multi-user-admin-plan.md` as background only.
+- Use `docs/research/self-hosted-reading-sync-research.md` and `docs/research/family-multi-user-admin-plan.md` as background only.
 - Do not migrate production from Calibre yet.
 - Build the core pilot around one official KOSync progress lane shared by CrossPoint, KOReader, and Readest.
 - Add Readest WebDAV after KOSync works; WebDAV is for Readest state, not the CrossPoint/KOReader bridge.
