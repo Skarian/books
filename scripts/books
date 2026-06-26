@@ -18,7 +18,7 @@ Usage: ./scripts/books COMMAND [ARGS...]
 
 Commands:
   status                 Show service status
-  health                 Check local nginx, calibre, calibre-web, portal, Readest, and KOSync health
+  health                 Check local nginx, calibre, calibre-web, portal, OPDS, and KOSync health
   verify [USER]          Run local production checks for routes and per-user auth
   restart                Restart services and reload nginx
   import [--convert] F   Import EPUB files into calibre
@@ -36,15 +36,13 @@ EOF
 
 case "${COMMAND}" in
   status)
-    systemctl --no-pager --full status books-calibre books-calibre-web books-portal books-kosync books-readest nginx
+    systemctl --no-pager --full status books-calibre books-calibre-web books-portal books-kosync nginx
     ;;
   health)
     source /etc/books/books.env
     curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz"
     curl -fsSI -u "${CALIBRE_OPDS_USER}:${CALIBRE_OPDS_PASSWORD}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/opds" | sed -n '1,12p'
     curl -fsS -H "Accept: application/vnd.koreader.v1+json" "http://127.0.0.1:${BOOKS_PROXY_PORT}/kosync/healthcheck"
-    curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/runtime-config.js" >/dev/null
-    curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/library" >/dev/null
     curl -fsS -H "X-ExeDev-Email: ${BOOKS_ALLOWED_EMAIL}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/" >/dev/null
     ;;
   verify)
@@ -75,8 +73,6 @@ PY
     setup_password="$(field setup_password)"
     opds_user="$(field opds_user)"
     opds_password="$(field opds_password)"
-    readest_email="$(field readest_email)"
-    readest_password="$(field readest_password)"
     kosync_user="$(field kosync_user)"
     kosync_password="$(field kosync_password)"
     kosync_key="$(printf '%s' "${kosync_password}" | md5sum | awk '{print $1}')"
@@ -87,7 +83,6 @@ PY
     systemctl is-active --quiet books-calibre-web
     systemctl is-active --quiet books-portal
     systemctl is-active --quiet books-kosync
-    systemctl is-active --quiet books-readest
     systemctl is-active --quiet nginx
 
     printf 'Checking portal and owner gate...\n'
@@ -103,28 +98,14 @@ PY
     curl -fsSI -u "${opds_user}:${opds_password}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/opds" >/dev/null
     curl -fsSI -u "${opds_user}:${opds_password}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/catalog" >/dev/null
 
-    printf 'Checking Readest Web...\n'
-    curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/runtime-config.js" | grep -q "SUPABASE\\|READEST_RUNTIME_CONFIG"
-    curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/library" >/dev/null
-    curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/auth/v1/health" >/dev/null
-    readest_login="$(curl -fsS -X POST "http://127.0.0.1:${BOOKS_PROXY_PORT}/auth/v1/token?grant_type=password" \
-      -H "apikey: ${READEST_ANON_KEY}" \
-      -H "Content-Type: application/json" \
-      -d "{\"email\":\"${readest_email}\",\"password\":\"${readest_password}\"}")"
-    python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["user"]["email"] == sys.argv[1]; assert data["access_token"]' "${readest_email}" <<<"${readest_login}"
-
     printf 'Checking KOSync...\n'
     curl -fsS -H "Accept: application/vnd.koreader.v1+json" "http://127.0.0.1:${BOOKS_PROXY_PORT}/kosync/healthcheck" >/dev/null
     curl -fsS -H "Accept: application/vnd.koreader.v1+json" -H "x-auth-user: ${kosync_user}" -H "x-auth-key: ${kosync_key}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/kosync/users/auth" >/dev/null
-    curl -fsS -X POST -H "Content-Type: application/json" \
-      -d "{\"serverUrl\":\"https://${BOOKS_PUBLIC_HOST}/kosync\",\"endpoint\":\"/users/auth\",\"method\":\"GET\",\"headers\":{\"X-Auth-User\":\"${kosync_user}\",\"X-Auth-Key\":\"${kosync_key}\"}}" \
-      "http://127.0.0.1:${BOOKS_PROXY_PORT}/api/kosync" >/dev/null
-    curl -fsS -X POST -H "Content-Type: application/json" \
-      -d "{\"serverUrl\":\"https://${BOOKS_PUBLIC_HOST}/kosync\",\"endpoint\":\"/syncs/progress\",\"method\":\"PUT\",\"headers\":{\"X-Auth-User\":\"${kosync_user}\",\"X-Auth-Key\":\"${kosync_key}\"},\"body\":{\"document\":\"${kosync_verify_doc}\",\"progress\":\"/body/DocFragment[1]/p[1]\",\"percentage\":0.42,\"device\":\"books-verify\",\"device_id\":\"books-verify\"}}" \
-      "http://127.0.0.1:${BOOKS_PROXY_PORT}/api/kosync" >/dev/null
-    kosync_progress="$(curl -fsS -X POST -H "Content-Type: application/json" \
-      -d "{\"serverUrl\":\"https://${BOOKS_PUBLIC_HOST}/kosync\",\"endpoint\":\"/syncs/progress/${kosync_verify_doc}\",\"method\":\"GET\",\"headers\":{\"X-Auth-User\":\"${kosync_user}\",\"X-Auth-Key\":\"${kosync_key}\"}}" \
-      "http://127.0.0.1:${BOOKS_PROXY_PORT}/api/kosync")"
+    curl -fsS -X PUT -H "Accept: application/vnd.koreader.v1+json" -H "Content-Type: application/json" -H "x-auth-user: ${kosync_user}" -H "x-auth-key: ${kosync_key}" \
+      -d "{\"document\":\"${kosync_verify_doc}\",\"progress\":\"/body/DocFragment[1]/p[1]\",\"percentage\":0.42,\"device\":\"books-verify\",\"device_id\":\"books-verify\"}" \
+      "http://127.0.0.1:${BOOKS_PROXY_PORT}/kosync/syncs/progress" >/dev/null
+    kosync_progress="$(curl -fsS -H "Accept: application/vnd.koreader.v1+json" -H "x-auth-user: ${kosync_user}" -H "x-auth-key: ${kosync_key}" \
+      "http://127.0.0.1:${BOOKS_PROXY_PORT}/kosync/syncs/progress/${kosync_verify_doc}")"
     python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["document"] == sys.argv[1]; assert abs(float(data["percentage"]) - 0.42) < 0.001' "${kosync_verify_doc}" <<<"${kosync_progress}"
 
     printf 'Checking KOSync image pin...\n'
@@ -137,7 +118,6 @@ PY
     sudo systemctl restart books-calibre-web
     sudo systemctl restart books-portal
     sudo systemctl restart books-kosync
-    sudo systemctl restart books-readest
     sudo nginx -t
     sudo systemctl reload nginx
     ;;

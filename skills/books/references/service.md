@@ -14,7 +14,6 @@
 - Calibre-Web service: `books-calibre-web`
 - Portal service: `books-portal`
 - KOSync service: `books-kosync`
-- Readest Web service: `books-readest`
 - Public host: `books.exe.xyz`
 
 ## Routing
@@ -22,16 +21,12 @@
 Nginx listens on `BOOKS_PROXY_PORT`, proxies native Calibre on
 `127.0.0.1:${CALIBRE_PORT}`, Calibre-Web on
 `127.0.0.1:${CALIBRE_WEB_PORT}`, the portal on
-`127.0.0.1:${BOOKS_PORTAL_PORT}`, KOSync on
-`127.0.0.1:${KOSYNC_PORT}`, and Readest Web on
-`127.0.0.1:${READEST_PORT}` plus its local Supabase API on
-`127.0.0.1:${READEST_KONG_PORT}`.
+`127.0.0.1:${BOOKS_PORTAL_PORT}`, and KOSync on
+`127.0.0.1:${KOSYNC_PORT}`.
 
-- `/library` is Readest Web.
+- `/library` redirects older local Readest links to `https://web.readest.com/`.
 - `/catalog`, `/opds`, and `/get/...` are open at nginx and protected by Calibre Basic auth for CrossPoint and reader apps. Prefer `/catalog` in user-facing setup.
 - `/kosync` is open at nginx and protected by KOSync credentials. Nginx strips the `/kosync` prefix before proxying to the KOSync container.
-- `/api/kosync` is the Readest Web bridge to local KOSync. KOSync remains the sync authority.
-- `/auth/v1` and `/rest/v1` proxy to the Readest Supabase stack.
 - `/setup/<user>` is open at nginx and protected by per-user setup Basic auth in the portal.
 - `/` and owner portal routes require `X-ExeDev-Email` to match `BOOKS_ALLOWED_EMAIL`.
 - `/calibre/` requires `X-ExeDev-Email` to match `BOOKS_ALLOWED_EMAIL`, then Calibre-Web auth.
@@ -100,9 +95,9 @@ Use the repo helper:
 ```
 
 The helper reconciles active users into Calibre OPDS users and KOSync Redis
-keys, and into Readest auth users. The setup page shows each user's Readest,
-OPDS, and KOSync values. Readest uses KOSync for progress; do not add WebDAV
-unless the device matrix proves OPDS plus KOSync is not enough.
+keys. The setup page shows each user's OPDS and KOSync values. Readest accounts
+are managed by Readest; this VM only provides the catalog and progress endpoint.
+Do not add WebDAV unless the device matrix proves OPDS plus KOSync is not enough.
 
 Run `./scripts/books verify USER` after onboarding, account changes, or service
 changes. It checks local nginx routes, owner gating, setup Basic auth, OPDS auth,

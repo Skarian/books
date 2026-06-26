@@ -3,7 +3,8 @@
 This repo supports a family bookshelf: shared books, private reading state.
 
 Everyone can read from the same Calibre library. Each person gets their own OPDS,
-Readest, KOSync, setup page, and upload permissions.
+KOSync, setup page, and upload permissions. They use their own Readest account
+with the official Readest apps and web reader.
 
 The owner workflow is chat/CLI-first. Neil can ask Codex to add, disable, rotate,
 or inspect a family reader, and Codex should use the repo helper rather than
@@ -19,7 +20,6 @@ Each family member has:
 | display name | shown in owner commands, setup pages, and optional admin UI |
 | slug | stable internal id, such as `alice` |
 | email | optional exe.dev identity for web routes |
-| Readest email/password | browser reader and Readest app login |
 | OPDS user | downloads from the shared Calibre bookshelf |
 | KOSync user | private reading position |
 | roles | reader, uploader, owner |
@@ -34,8 +34,8 @@ The account registry lives outside git, for example:
 The helper creates the schema from git-tracked code. Generated service state is
 rebuilt from the registry.
 
-The registry stores service usernames, roles, status, generated passwords, and
-the Readest password and setup-page password for each reader. The database lives under
+The registry stores service usernames, roles, status, generated OPDS/KOSync
+passwords, and the setup-page password for each reader. The database lives under
 `/srv/books/config`, not in git. Keep it with the runtime backup set and rotate a
 reader if their credentials are exposed. KOSync also needs the derived userkey
 that its server stores and compares during auth. Setup pages show the raw
@@ -51,7 +51,7 @@ The repo will expose the owner workflow through `scripts/books`:
 ./scripts/books users create NAME --email EMAIL [--upload]
 ./scripts/books users disable USER
 ./scripts/books users purge USER
-./scripts/books users rotate USER [opds|readest|kosync|setup|all]
+./scripts/books users rotate USER [opds|kosync|setup|all]
 ./scripts/books users show USER
 ./scripts/books users reconcile
 ```
@@ -59,11 +59,10 @@ The repo will expose the owner workflow through `scripts/books`:
 `disable` revokes access and keeps the user's state. `purge` removes the user's
 state and requires confirmation plus a recent backup or an explicit backup skip.
 
-`reconcile` is the rebuild command. It recreates Calibre OPDS users, Readest
-users, KOSync users, setup pages, and optional admin-panel views from the account
+`reconcile` is the rebuild command. It recreates Calibre OPDS users, KOSync
+users, setup pages, and optional admin-panel views from the account
 registry without rotating credentials unless the owner asks for rotation.
-`rotate USER all` changes OPDS, Readest, KOSync, and setup-page passwords
-together.
+`rotate USER all` changes OPDS, KOSync, and setup-page passwords together.
 
 Official KOSync has no admin API for disable, rotate, or purge. The repo helper
 therefore owns those lifecycle actions against the pinned KOSync data store. It
@@ -105,24 +104,28 @@ strings, QR codes, and access logs where possible.
 
 Each user gets one setup page written around devices:
 
-1. Sign in to Readest.
+1. Open Readest and sign in with their own Readest account.
 2. Add the book catalog.
 3. Sync my place with KOSync.
 4. Upload a book, if uploads are enabled.
 5. Advanced values.
 
-The page can show that user's Readest, OPDS, and KOSync credentials. It must not
-show owner credentials, another user's credentials, Anna's Archive tooling, local
+The page can show that user's OPDS and KOSync credentials. It must not show
+owner credentials, another user's credentials, Anna's Archive tooling, local
 ports, Redis paths, systemd units, `/srv/books`, or `/etc/books/books.env`.
 
 The setup page should tell Readest users to configure OPDS Catalogs and
 KOReader Sync as two separate app settings:
 
-- Readest login gets the user's `/library` URL, Readest email, and Readest
-  password.
+- Readest gets the official app or `https://web.readest.com/` and the user's own
+  Readest account.
 - OPDS Catalogs gets the user's `/catalog` URL, OPDS username, and OPDS password.
 - KOReader Sync gets the user's `/kosync` URL, KOSync username, and KOSync
   password.
+
+The page should also say that Readest can copy OPDS and KOSync settings to other
+signed-in Readest devices. Credentials only sync if the reader turns on
+Credentials sync and sets a Readest sync passphrase.
 
 The page should make clear that KOSync syncs reading position only. Readest
 highlights, notes, bookmarks, collections, and ratings are not part of the core
@@ -158,7 +161,6 @@ Implemented now:
 - one OPDS device user
 - one Calibre-Web admin user for Neil
 - family account registry
-- Readest user reconciliation
 - KOSync user reconciliation
 - user commands
 - setup pages

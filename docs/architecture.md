@@ -12,14 +12,11 @@ The repo stands up this public shape:
 
 ```text
 https://books.exe.xyz
-  /library          -> self-hosted Readest Web reader
   /catalog          -> shared Calibre bookshelf for setup and apps
   /opds             -> shared Calibre bookshelf
   /get/...          -> canonical EPUB downloads
   /kosync           -> progress sync
-  /api/kosync       -> Readest Web bridge to local KOSync
-  /auth/v1          -> Readest auth
-  /rest/v1          -> Readest data API
+  /library          -> redirect to official Readest Web
   /setup/<user>     -> per-user setup and book requests
   /calibre/         -> owner Calibre-Web
   /                 -> owner portal
@@ -28,7 +25,7 @@ https://books.exe.xyz
 The split matters:
 
 - Calibre owns the books.
-- Readest owns the browser/app reading session.
+- Readest owns the browser/app reading session on its own hosted service and apps.
 - KOSync owns reading position.
 - The account helper owns the family workflow, not the library data itself.
 
@@ -48,8 +45,7 @@ Those routes authenticate with service credentials. OPDS uses Calibre Basic auth
 KOSync uses KOSync credentials.
 
 Use `/catalog` in setup docs and user pages. `/opds` remains available for apps
-that expect that exact path, but Readest also owns a browser page at `/opds`.
-Nginx handles the overlap, and `/catalog` keeps the human setup path obvious.
+that expect that exact path.
 
 The public KOSync URL for clients is `https://books.exe.xyz/kosync`. Reader apps
 append KOSync API paths such as `/users/auth` and `/syncs/progress`, so nginx
@@ -77,9 +73,9 @@ credentials.
 |---|---|---|
 | Calibre | EPUB files, metadata, OPDS catalog, downloads | progress, highlights, family admin |
 | Calibre-Web | owner browser reader and owner library UI | public family admin, cross-device progress |
-| Readest Web | browser/app reader account, app library state | progress authority, canonical book files |
+| Official Readest | browser/app reader account, app library state | progress authority, canonical book files, VM operations |
 | KOSync | per-user reading position for canonical EPUBs | book files, notes, highlights |
-| Account helper | users, Readest credentials, OPDS credentials, KOSync credentials, setup pages, service reconciliation | direct service state outside the shared helper |
+| Account helper | OPDS credentials, KOSync credentials, setup pages, service reconciliation | Readest accounts, direct service state outside the shared helper |
 
 `scripts/books users ...` is the primary owner interface. Codex can use it
 through the `books` skill when Neil wants to add, disable, rotate, or inspect a
@@ -97,11 +93,15 @@ That is acceptable for one human moving between devices, but it is why each
 person needs a separate KOSync account.
 
 Readest gets books through OPDS and syncs position through KOReader Sync. That is
-the default path. The web reader lives at `/library`, but progress still goes
-through KOSync. The Readest Web app cannot call the public `books.exe.xyz`
-address from inside this VM, so nginx sends `/api/kosync` to the portal bridge,
-which forwards only this service's allowed KOSync calls to the local KOSync
-container.
+the default path. The web reader lives at `https://web.readest.com/`, and
+`/library` only redirects old local links there. Readest's hosted web app uses
+its own server-side KOSync proxy for public sync servers, so this VM only needs
+to expose `https://books.exe.xyz/kosync` correctly.
+
+Readest account sync can copy the OPDS catalog, KOSync settings, and optionally
+credentials across signed-in Readest devices. Credentials require Readest's
+Credentials sync and a user-chosen sync passphrase. The VM does not create or
+rotate Readest accounts.
 
 Current upstream Readest exposes these integrations separately:
 
@@ -140,7 +140,6 @@ Runtime state stays outside git:
 - `/srv/books/config`
 - `/srv/books/calibre-web`
 - `/srv/books/kosync`
-- `/srv/books/readest`
 - `/srv/books/inbox`
 
 Backups need the runtime paths. Git recreates the service, not the books or
@@ -172,13 +171,11 @@ Implemented now:
 - Anna's Archive MCP/CLI
 - OPDS and `/get/...`
 - KOSync
-- Readest Web
 - family account registry
 - `scripts/books users ...`
 - setup pages
 - book request queue
 - owner-only Calibre-Web
-- owner and family Readest accounts
 - import helpers
 - onboarding
 

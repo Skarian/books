@@ -6,10 +6,8 @@ import json
 import os
 import re
 import sqlite3
-import ssl
 import sys
 import urllib.parse
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -37,7 +35,7 @@ ALLOWED_EMAIL = ENV.get("BOOKS_ALLOWED_EMAIL", "neil.skaria@gmail.com")
 ACCOUNTS_DB = Path(ENV.get("BOOKS_ACCOUNTS_DB", "/srv/books/config/accounts.sqlite"))
 REQUESTS_DIR = Path(ENV.get("BOOKS_REQUESTS_DIR", "/srv/books/requests"))
 PORT = int(ENV.get("BOOKS_PORTAL_PORT", "8090"))
-KOSYNC_PORT = int(ENV.get("KOSYNC_PORT", "7200"))
+READEST_WEB_URL = "https://web.readest.com/"
 
 
 STYLE = """
@@ -181,9 +179,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
-        if path == "/api/kosync":
-            self.readest_kosync_proxy()
-        elif path.startswith("/setup/") and path.endswith("/request"):
+        if path.startswith("/setup/") and path.endswith("/request"):
             slug = path.split("/")[2]
             row = self.setup_auth(slug)
             if not row:
@@ -205,78 +201,6 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_html("Not found", "<div class='card'><h1>Not found</h1></div>", 404)
 
-    def send_json(self, payload, code=200):
-        content = json.dumps(payload).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(content)
-
-    def readest_kosync_proxy(self):
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-            payload = json.loads(self.rfile.read(length).decode())
-        except Exception:
-            self.send_json({"error": "Invalid JSON body"}, 400)
-            return
-
-        server_url = str(payload.get("serverUrl", "")).rstrip("/")
-        endpoint = str(payload.get("endpoint", ""))
-        method = str(payload.get("method", "GET")).upper()
-        headers = payload.get("headers") or {}
-        body = payload.get("body")
-
-        try:
-            parsed = urllib.parse.urlparse(server_url)
-        except Exception:
-            self.send_json({"error": "Invalid serverUrl"}, 400)
-            return
-
-        if parsed.scheme != "https" or parsed.netloc != PUBLIC_HOST or parsed.path.rstrip("/") != "/kosync":
-            self.send_json({"error": "This Readest instance only proxies its own KOSync server."}, 400)
-            return
-        if method not in {"GET", "POST", "PUT"}:
-            self.send_json({"error": "Invalid method"}, 400)
-            return
-        if not any(re.fullmatch(pattern, endpoint) for pattern in (r"/users/auth", r"/users/create", r"/syncs/progress", r"/syncs/progress/[^/]+")):
-            self.send_json({"error": "Invalid endpoint"}, 400)
-            return
-
-        target = f"https://127.0.0.1:{KOSYNC_PORT}{endpoint}"
-        outbound_headers = {
-            "Accept": "application/vnd.koreader.v1+json",
-            "Content-Type": "application/json",
-        }
-        for key, value in headers.items():
-            lk = str(key).lower()
-            if lk in {"x-auth-user", "x-auth-key", "authorization"}:
-                outbound_headers[str(key)] = str(value)
-        data = json.dumps(body).encode() if body is not None else None
-        request = urllib.request.Request(target, data=data, method=method, headers=outbound_headers)
-
-        try:
-            context = ssl._create_unverified_context()
-            with urllib.request.urlopen(request, context=context, timeout=15) as response:
-                content = response.read()
-                code = response.status
-                content_type = response.headers.get("Content-Type", "application/json")
-        except urllib.error.HTTPError as error:
-            content = error.read()
-            code = error.code
-            content_type = error.headers.get("Content-Type", "application/json")
-        except Exception as error:
-            self.send_json({"error": "Proxy request failed", "details": str(error)}, 502)
-            return
-
-        self.send_response(code)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(content)
-
     def chrome(self, title, inner):
         return f"<div class='top'><div><div class='brand'>Neil's Books</div><div class='muted'>{esc(title)}</div></div><nav class='nav'><a href='/'>Home</a><a href='/guide'>Guide</a><a href='/users'>Users</a><a href='/requests'>Requests</a><a href='/calibre/'>Calibre</a></nav></div>{inner}"
 
@@ -289,7 +213,7 @@ class Handler(BaseHTTPRequestHandler):
         requests = load_requests()
         open_requests = sum(1 for row in requests if row.get("status", "new") not in {"fulfilled", "done", "rejected"})
         body = f"""
-        <section class='hero'><h1>Neil's Books</h1><p>A self-hosted EPUB library for the family. Readest handles browser and app reading, Calibre serves the catalog, and KOSync keeps reading position synced across devices.</p><div class='row'><span class='pill'>{users} active reader{"s" if users != 1 else ""}</span><span class='pill'>{open_requests} open request{"s" if open_requests != 1 else ""}</span><span class='pill'>Catalog on /catalog</span><span class='pill'>Progress sync on /kosync</span></div><div class='actions'><a class='button' href='/library'>Read in browser</a><a class='button secondary' href='/guide'>Set up a device</a></div></section>
+        <section class='hero'><h1>Neil's Books</h1><p>A self-hosted EPUB catalog and progress-sync service for the family. Readest provides the apps and web reader; this VM provides the private book catalog, KOSync accounts, setup pages, and request queue.</p><div class='row'><span class='pill'>{users} active reader{"s" if users != 1 else ""}</span><span class='pill'>{open_requests} open request{"s" if open_requests != 1 else ""}</span><span class='pill'>Catalog on /catalog</span><span class='pill'>Progress sync on /kosync</span></div><div class='actions'><a class='button' href='{READEST_WEB_URL}'>Open Readest</a><a class='button secondary' href='/guide'>Set up a device</a></div></section>
         <div class='grid'>
           <section class='card'><h2>Calibre admin</h2><p>Use this when you need metadata, imports, or the older Calibre-Web UI.</p><a class='button' href='/calibre/'>Open Calibre</a></section>
           <section class='card'><h2>Family readers</h2><p>Add a reader, rotate credentials, or open their private setup page.</p><a class='button' href='/users'>View users</a></section>
@@ -303,8 +227,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         body = f"""
         <div class='stack steps'>
-        <section class='hero'><h1>Set up reading</h1><p>Each person has a private setup page with their own passwords. The URLs are shared, but the logins are not.</p><div class='grid'><div class='field'><b>Readest Web</b><span>https://{PUBLIC_HOST}/library</span></div><div class='field'><b>Book catalog</b><span>https://{PUBLIC_HOST}/catalog</span></div><div class='field'><b>Reading-place sync</b><span>https://{PUBLIC_HOST}/kosync</span></div></div></section>
-        <section class='card step'><h2>Readest on iPad, Android, Mac, and Windows</h2><ol><li>Sign in with the Readest email and password from the reader's setup page.</li><li>Open Settings, then Integrations.</li><li>Under Content Sources, open OPDS Catalogs and tap Add Catalog.</li><li>Under Reading Sync, open KOReader Sync and connect to KOSync.</li><li>After it connects, leave Checksum Method set to File Content.</li></ol></section>
+        <section class='hero'><h1>Set up reading</h1><p>Each person has a private setup page with their own OPDS and KOSync passwords. They use their own Readest account for the Readest apps and web reader.</p><div class='grid'><div class='field'><b>Readest</b><span>{READEST_WEB_URL}</span></div><div class='field'><b>Book catalog</b><span>https://{PUBLIC_HOST}/catalog</span></div><div class='field'><b>Reading-place sync</b><span>https://{PUBLIC_HOST}/kosync</span></div></div></section>
+        <section class='card step'><h2>Readest on iPad, Android, Mac, and Windows</h2><ol><li>Install Readest, or open <span class='code'>{READEST_WEB_URL}</span>.</li><li>Create a Readest account or sign in to the account you already use.</li><li>Open Settings, then Integrations.</li><li>Under Content Sources, open OPDS Catalogs and tap Add Catalog.</li><li>Under Reading Sync, open KOReader Sync and connect to KOSync.</li><li>After it connects, leave Checksum Method set to File Content.</li><li>To carry the catalog and KOSync login to other Readest devices, open Account or Advanced Settings, then Manage Sync, enable Credentials, and set a sync passphrase.</li></ol></section>
         <section class='card step'><h2>XTEink X4 with CrossPoint</h2><p>Add the book catalog URL and use the reader's OPDS login. If CrossPoint exposes KOReader-compatible progress sync, use the same KOSync server and that reader's KOSync login.</p></section>
         <section class='card step'><h2>KOReader</h2><p>Add the catalog as an OPDS catalog and configure Progress Sync with the KOSync values. KOReader is the reference app for validating sync behavior.</p></section>
         <section class='card step'><h2>What to avoid</h2><p>Use <span class='code'>https://{PUBLIC_HOST}/kosync</span> exactly. Do not add <span class='code'>/api</span>, <span class='code'>/v1</span>, or <span class='code'>/healthcheck</span>. For progress sync, download the same EPUB from this catalog on each device.</p></section>
@@ -320,9 +244,9 @@ class Handler(BaseHTTPRequestHandler):
         conn.close()
         table = "<table><tr><th>User</th><th>Status</th><th>Readest</th><th>Setup page</th><th>Setup login</th><th>CLI</th></tr>"
         for row in rows:
-            table += f"<tr><td>{esc(row['display_name'])}<br><span class='muted'>{esc(row['email'])}</span></td><td><span class='pill'>{esc(row['status'])}</span></td><td><div class='code'>{esc(row['readest_email'])}</div><div class='code'>{esc(row['readest_password'])}</div></td><td><a href='/setup/{esc(row['slug'])}'>/setup/{esc(row['slug'])}</a></td><td><div class='code'>{esc(row['setup_user'])}</div><div class='code'>{esc(row['setup_password'])}</div></td><td><pre class='code'>./scripts/books users show {esc(row['slug'])}</pre><pre class='code'>./scripts/books users rotate {esc(row['slug'])} all</pre><pre class='code'>./scripts/books users reconcile {esc(row['slug'])}</pre></td></tr>"
+            table += f"<tr><td>{esc(row['display_name'])}<br><span class='muted'>{esc(row['email'])}</span></td><td><span class='pill'>{esc(row['status'])}</span></td><td>Uses their own Readest account at <span class='code'>{READEST_WEB_URL}</span></td><td><a href='/setup/{esc(row['slug'])}'>/setup/{esc(row['slug'])}</a></td><td><div class='code'>{esc(row['setup_user'])}</div><div class='code'>{esc(row['setup_password'])}</div></td><td><pre class='code'>./scripts/books users show {esc(row['slug'])}</pre><pre class='code'>./scripts/books users rotate {esc(row['slug'])} all</pre><pre class='code'>./scripts/books users reconcile {esc(row['slug'])}</pre></td></tr>"
         table += "</table>"
-        body = f"<section class='card'><h1>Family readers</h1><p>Create users by asking Codex, or run <span class='code'>./scripts/books users create \"Name\" --email person@example.com</span>. Reconcile pushes that account into Calibre OPDS, Readest, and KOSync.</p>{table}</section>"
+        body = f"<section class='card'><h1>Family readers</h1><p>Create users by asking Codex, or run <span class='code'>./scripts/books users create \"Name\" --email person@example.com</span>. Reconcile pushes OPDS access into Calibre and progress-sync access into KOSync. Readest accounts are managed by Readest.</p>{table}</section>"
         self.send_html("Users", self.chrome("family users", body))
 
     def requests(self):
@@ -349,11 +273,12 @@ class Handler(BaseHTTPRequestHandler):
         request_table = "<p class='muted'>No requests yet.</p>" if not rows else "<table><tr><th>Time</th><th>Book</th><th>Status</th><th>Note</th></tr>%s</table>" % "".join(rows)
         body = f"""
         <div class='top'><div><div class='brand'>Neil's Books for {esc(row['display_name'])}</div><div class='muted'>shared books, private reading place</div></div></div>
-        <section class='hero'><h1>Start here</h1><p>Readest is the easiest place to begin. Use the catalog for books and KOSync for your reading place. Keep these credentials private; they are just for you.</p><div class='actions'><a class='button' href='/library'>Read in browser</a></div></section>
+        <section class='hero'><h1>Start here</h1><p>Readest is the easiest place to begin. This page gives you the private catalog login for books and the private KOSync login for reading position. Keep them to yourself.</p><div class='actions'><a class='button' href='{READEST_WEB_URL}'>Open Readest</a></div></section>
         <div class='grid steps'>
-          <section class='card step'><h2>Sign in to Readest</h2><p>Use this for Readest Web and the Readest apps.</p><ol><li>Open the URL below.</li><li>Tap Sign in to sync your library.</li><li>Enter this email and password.</li></ol><div class='field'><b>URL</b><span>https://{PUBLIC_HOST}/library</span></div><div class='field'><b>Email</b><span>{esc(row['readest_email'])}</span></div><div class='field'><b>Password</b><span>{esc(row['readest_password'])}</span></div></section>
+          <section class='card step'><h2>Open Readest</h2><p>Use Readest for iPad, Android, Mac, Windows, or the web. Readest keeps its own account; Neil's Books gives it books and reading-position sync.</p><ol><li>Install Readest from your app store, or open the URL below.</li><li>Create a Readest account, or sign in to your existing one.</li><li>Stay signed in on each device where you want your Readest library and settings to follow you.</li></ol><div class='field'><b>Readest</b><span>{READEST_WEB_URL}</span></div></section>
           <section class='card step'><h2>Add the book catalog</h2><p>This is where Readest, CrossPoint, and KOReader find books.</p><ol><li>In Readest, open Settings, then Integrations.</li><li>Under Content Sources, open OPDS Catalogs.</li><li>Tap Add Catalog and enter these values.</li></ol><div class='field'><b>Catalog URL</b><span>https://{PUBLIC_HOST}/catalog</span></div><div class='field'><b>Username</b><span>{esc(row['opds_user'])}</span></div><div class='field'><b>Password</b><span>{esc(row['opds_password'])}</span></div></section>
           <section class='card step'><h2>Turn on progress sync</h2><p>This keeps your reading place synced across Readest, CrossPoint, and KOReader.</p><ol><li>In Readest, open Settings, then Integrations.</li><li>Under Reading Sync, open KOReader Sync.</li><li>Enter these values and tap Connect.</li><li>After it connects, leave Checksum Method set to File Content.</li></ol><div class='field'><b>KOSync server</b><span>https://{PUBLIC_HOST}/kosync</span></div><div class='field'><b>Username</b><span>{esc(row['kosync_user'])}</span></div><div class='field'><b>Password</b><span>{esc(row['kosync_password'])}</span></div></section>
+          <section class='card step'><h2>Let Readest remember this</h2><p>After catalog and KOSync are connected, Readest can copy those settings to your other Readest devices.</p><ol><li>Open Account or Advanced Settings.</li><li>Open Manage Sync.</li><li>Make sure App settings and OPDS catalogs are on.</li><li>Turn on Credentials.</li><li>Set a sync passphrase. Use the same passphrase on your other Readest devices.</li></ol><p class='muted'>Without Credentials sync, Readest may copy the catalog URL but ask you to enter the OPDS and KOSync passwords again.</p></section>
         </div>
         <section class='card' style='margin-top:14px'><h2>Test sync once</h2><p>Look for <b>Books Sync Fixture</b> in the catalog. If you do not see it, search for that exact title. Open it on one device, go to <b>Sync marker three</b>, then open the same book on another device with this same KOSync login. If the second device opens near marker three, progress sync is working.</p><p class='muted'>If the test book is missing, ask Neil to run <span class='code'>./scripts/books sync-fixture</span>.</p></section>
         <section class='card' style='margin-top:14px'><h2>Device notes</h2><p><b>iPad, Android, Mac, Windows:</b> use Readest first. <b>XTEink X4 with CrossPoint:</b> add the catalog and use KOSync if the sync settings are available. <b>KOReader:</b> catalog plus Progress Sync is the reference setup.</p><p class='muted'>Leave WebDAV off unless we add it later for a specific device problem.</p></section>

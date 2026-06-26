@@ -10,8 +10,6 @@ import secrets
 import sqlite3
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 ENV_FILE = Path("/etc/books/books.env")
@@ -40,7 +38,6 @@ PUBLIC_HOST = ENV.get("BOOKS_PUBLIC_HOST", "books.exe.xyz")
 USERDB = ENV.get("BOOKS_USERDB", "/srv/books/config/users.sqlite")
 KOSYNC_CONTAINER = ENV.get("KOSYNC_CONTAINER", "books-kosync")
 BOOKS_PROXY_PORT = ENV.get("BOOKS_PROXY_PORT", "8000")
-READEST_SERVICE_ROLE_KEY = ENV.get("READEST_SERVICE_ROLE_KEY", "")
 
 
 def now():
@@ -76,8 +73,6 @@ def db():
           roles text not null default 'reader',
           opds_user text not null unique,
           opds_password text not null,
-          readest_email text,
-          readest_password text,
           kosync_user text not null unique,
           kosync_password text not null,
           kosync_userkey text not null,
@@ -91,26 +86,8 @@ def db():
         """
     )
     columns = {row["name"] for row in conn.execute("pragma table_info(accounts)").fetchall()}
-    if "readest_email" not in columns:
-        conn.execute("alter table accounts add column readest_email text")
-    if "readest_password" not in columns:
-        conn.execute("alter table accounts add column readest_password text")
-    rows = conn.execute(
-        "select slug, email, readest_email, readest_password from accounts"
-    ).fetchall()
-    for row in rows:
-        updates = {}
-        if not row["readest_email"]:
-            updates["readest_email"] = row["email"] or f"{row['slug']}@{PUBLIC_HOST}"
-        if not row["readest_password"]:
-            updates["readest_password"] = password()
-        if updates:
-            updates["updated_at"] = now()
-            assignments = ", ".join(f"{key}=?" for key in updates)
-            conn.execute(
-                f"update accounts set {assignments} where slug=?",
-                [*updates.values(), row["slug"]],
-            )
+    # Legacy installs may still have readest_email/readest_password columns from
+    # the self-hosted Readest experiment. They are intentionally ignored.
     conn.execute(
         """
         create table if not exists audit_log (
@@ -176,57 +153,6 @@ def calibre_remove_user(user):
         run(["calibre-server", "--userdb", USERDB, "--manage-users", "--", "remove", user], check=False)
 
 
-def readest_admin_request(method, path, payload=None):
-    if not READEST_SERVICE_ROLE_KEY:
-        raise SystemExit("READEST_SERVICE_ROLE_KEY is missing from /etc/books/books.env")
-    body = None
-    headers = {
-        "apikey": READEST_SERVICE_ROLE_KEY,
-        "Authorization": f"Bearer {READEST_SERVICE_ROLE_KEY}",
-        "Content-Type": "application/json",
-    }
-    if payload is not None:
-        body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{BOOKS_PROXY_PORT}/auth/v1{path}",
-        data=body,
-        headers=headers,
-        method=method,
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = resp.read()
-            if not data:
-                return None
-            return json.loads(data.decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise SystemExit(f"Readest admin API failed: {method} {path} -> {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise SystemExit(f"Readest admin API is not reachable: {exc}") from exc
-
-
-def readest_find_user(email):
-    data = readest_admin_request("GET", "/admin/users") or {}
-    for user in data.get("users", []):
-        if user.get("email", "").lower() == email.lower():
-            return user
-    return None
-
-
-def readest_set_user(email, pw, active=True):
-    existing = readest_find_user(email)
-    if active:
-        payload = {"email": email, "password": pw, "email_confirm": True}
-        if existing:
-            readest_admin_request("PUT", f"/admin/users/{existing['id']}", payload)
-        else:
-            readest_admin_request("POST", "/admin/users", payload)
-        return
-    if existing:
-        readest_admin_request("DELETE", f"/admin/users/{existing['id']}")
-
-
 def get_account(conn, slug):
     row = conn.execute("select * from accounts where slug=?", (slug,)).fetchone()
     if not row:
@@ -249,7 +175,6 @@ def cmd_create(args):
     opds_pw = password()
     kosync_pw = password()
     setup_pw = password()
-    readest_pw = password()
     roles = ["reader"]
     if args.upload:
         roles.append("uploader")
@@ -258,10 +183,10 @@ def cmd_create(args):
         """
         insert into accounts(
           slug, display_name, email, status, roles,
-          opds_user, opds_password, readest_email, readest_password,
+          opds_user, opds_password,
           kosync_user, kosync_password, kosync_userkey,
           setup_user, setup_password, created_at, updated_at
-        ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             slug,
@@ -271,8 +196,6 @@ def cmd_create(args):
             ",".join(roles),
             f"opds_{slug}",
             opds_pw,
-            args.email or f"{slug}@{PUBLIC_HOST}",
-            readest_pw,
             f"sync_{slug}",
             kosync_pw,
             md5(kosync_pw),
@@ -305,9 +228,7 @@ def account_payload(row):
         "status": row["status"],
         "roles": row["roles"],
         "setup_url": f"https://{PUBLIC_HOST}/setup/{row['slug']}",
-        "readest_url": f"https://{PUBLIC_HOST}/library",
-        "readest_email": row["readest_email"],
-        "readest_password": row["readest_password"],
+        "readest_url": "https://web.readest.com/",
         "opds_url": f"https://{PUBLIC_HOST}/catalog",
         "opds_user": row["opds_user"],
         "opds_password": row["opds_password"],
@@ -331,9 +252,8 @@ def cmd_show(args):
         print(f"Setup login: {payload['setup_user']}")
         print(f"Setup password: {payload['setup_password']}")
         print()
-        print(f"Readest Web: {payload['readest_url']}")
-        print(f"Readest email: {payload['readest_email']}")
-        print(f"Readest password: {payload['readest_password']}")
+        print(f"Readest: {payload['readest_url']}")
+        print("Readest account: create or sign in with your own Readest account.")
         print()
         print(f"OPDS URL: {payload['opds_url']}")
         print(f"OPDS username: {payload['opds_user']}")
@@ -363,8 +283,6 @@ def cmd_rotate(args):
     updates = {"updated_at": now()}
     if service in ("opds", "all"):
         updates["opds_password"] = password()
-    if service in ("readest", "all"):
-        updates["readest_password"] = password()
     if service in ("kosync", "all"):
         kosync_pw = password()
         updates["kosync_password"] = kosync_pw
@@ -389,7 +307,6 @@ def cmd_purge(args):
     row = get_account(conn, args.user)
     kosync_purge_user(row["kosync_user"])
     calibre_remove_user(row["opds_user"])
-    readest_set_user(row["readest_email"], row["readest_password"], False)
     audit(conn, "purge", row["slug"])
     conn.execute("delete from accounts where slug=?", (row["slug"],))
     conn.commit()
@@ -413,12 +330,10 @@ def cmd_reconcile(args):
     for row in rows:
         if row["status"] == "active":
             calibre_set_user(row["opds_user"], row["opds_password"], True)
-            readest_set_user(row["readest_email"], row["readest_password"], True)
             kosync_set_user(row["kosync_user"], row["kosync_userkey"])
             print(f"reconciled active user {row['slug']}")
         else:
             calibre_set_user(row["opds_user"], password(), False)
-            readest_set_user(row["readest_email"], row["readest_password"], False)
             kosync_disable_user(row["kosync_user"])
             print(f"disabled service access for {row['slug']}")
     try:
@@ -521,7 +436,7 @@ def main():
     disable.set_defaults(func=cmd_disable)
     rotate = sub.add_parser("rotate")
     rotate.add_argument("user")
-    rotate.add_argument("service", choices=["opds", "readest", "kosync", "setup", "all"])
+    rotate.add_argument("service", choices=["opds", "kosync", "setup", "all"])
     rotate.set_defaults(func=cmd_rotate)
     purge = sub.add_parser("purge")
     purge.add_argument("user")

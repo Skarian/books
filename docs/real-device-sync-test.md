@@ -1,9 +1,9 @@
 # Real-device sync test
 
 Use this when the server is healthy and you are ready to test actual devices.
-The VM can prove Readest login, OPDS auth, and KOSync progress writes locally,
-but it cannot prove that CrossPoint, Readest apps, and KOReader land in the
-right place on physical devices.
+The VM can prove OPDS auth and KOSync progress writes locally, but it cannot
+prove that CrossPoint, Readest apps, and KOReader land in the right place on
+physical devices.
 
 ## 1. Add the test book
 
@@ -23,7 +23,7 @@ Open the user's setup page and follow the steps there.
 
 For Readest:
 
-1. Sign in to Readest.
+1. Sign in to your Readest account.
 2. Open Settings, then Integrations.
 3. Add the OPDS catalog under Content Sources.
 4. Connect KOReader Sync under Reading Sync.

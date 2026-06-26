@@ -18,16 +18,6 @@ map $http_x_exedev_email $books_exedev_owner {
     "__BOOKS_ALLOWED_EMAIL__" 1;
 }
 
-map $http_accept $books_opds_browser {
-    default 0;
-    "~*text/html" 1;
-}
-
-map $books_opds_browser $books_opds_backend {
-    default books_calibre;
-    1 books_readest;
-}
-
 upstream books_calibre {
     server 127.0.0.1:__CALIBRE_PORT__;
     keepalive 16;
@@ -45,21 +35,6 @@ upstream books_portal {
 
 upstream books_kosync {
     server 127.0.0.1:__KOSYNC_PORT__;
-    keepalive 16;
-}
-
-upstream books_readest {
-    server 127.0.0.1:__READEST_PORT__;
-    keepalive 16;
-}
-
-upstream books_readest_kong {
-    server 127.0.0.1:__READEST_KONG_PORT__;
-    keepalive 16;
-}
-
-upstream books_readest_minio {
-    server 127.0.0.1:__READEST_MINIO_PORT__;
     keepalive 16;
 }
 
@@ -94,10 +69,9 @@ server {
         proxy_pass http://books_calibre;
     }
 
-    # Crosspoint/OPDS clients can authenticate directly to calibre with Basic auth.
-    # Browser navigation to /opds opens Readest's OPDS screen.
+    # CrossPoint, Readest, and KOReader authenticate directly to Calibre with Basic auth.
     location ^~ /opds {
-        proxy_pass http://$books_opds_backend;
+        proxy_pass http://books_calibre;
     }
 
     # Calibre OPDS acquisition, cover, and thumbnail links use /get/...
@@ -115,30 +89,6 @@ server {
         proxy_set_header X-Forwarded-Prefix /kosync;
         proxy_ssl_verify off;
         proxy_pass https://books_kosync;
-    }
-
-    # Readest Web posts KOSync requests here. The portal proxy rewrites trusted
-    # books.exe.xyz /kosync calls to the local KOSync container, avoiding the
-    # exe.dev public-endpoint hairpin problem inside the VM.
-    location = /api/kosync {
-        proxy_pass http://books_portal;
-    }
-
-    location ^~ /api/ {
-        proxy_pass http://books_readest;
-    }
-
-    location ^~ /auth/v1/ {
-        proxy_pass http://books_readest_kong;
-    }
-
-    location ^~ /rest/v1/ {
-        proxy_pass http://books_readest_kong;
-    }
-
-    location ^~ /readest-files/ {
-        rewrite ^/readest-files/(.*)$ /readest-files/$1 break;
-        proxy_pass http://books_readest_minio;
     }
 
     location = /favicon.png {
@@ -171,30 +121,10 @@ server {
         proxy_pass http://books_portal;
     }
 
-    # Readest Web owns these app and asset paths.
-    location ^~ /_next/ { proxy_pass http://books_readest; }
-    location ^~ /assets/ { proxy_pass http://books_readest; }
-    location ^~ /fonts/ { proxy_pass http://books_readest; }
-    location ^~ /images/ { proxy_pass http://books_readest; }
-    location ^~ /vendor/ { proxy_pass http://books_readest; }
-    location ^~ /locales/ { proxy_pass http://books_readest; }
-    location ^~ /.well-known/ { proxy_pass http://books_readest; }
-    location = /favicon.ico { proxy_pass http://books_readest; }
-    location = /manifest.json { proxy_pass http://books_readest; }
-    location = /apple-touch-icon.png { proxy_pass http://books_readest; }
-    location = /icon.png { proxy_pass http://books_readest; }
-    location = /icon-tiny.png { proxy_pass http://books_readest; }
-    location = /runtime-config.js { proxy_pass http://books_readest; }
-    location = /sw.js { proxy_pass http://books_readest; }
-    location ^~ /library { proxy_pass http://books_readest; }
-    location ^~ /reader { proxy_pass http://books_readest; }
-    location ^~ /auth { proxy_pass http://books_readest; }
-    location ^~ /user { proxy_pass http://books_readest; }
-    location ^~ /send { proxy_pass http://books_readest; }
-    location ^~ /offline { proxy_pass http://books_readest; }
-    location ^~ /updater { proxy_pass http://books_readest; }
-    location ^~ /o { proxy_pass http://books_readest; }
-    location ^~ /s { proxy_pass http://books_readest; }
+    # Compatibility for older setup links from the self-hosted Readest pilot.
+    location ^~ /library {
+        return 302 https://web.readest.com/;
+    }
 
     # Owner portal routes.
     location / {

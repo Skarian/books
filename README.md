@@ -1,9 +1,10 @@
 # Books service
 
 Reproducible setup for Neil's self-hosted reading system on `books.exe.xyz`.
-The repo stands up the shared Calibre bookshelf, self-hosted Readest Web,
-cross-device KOSync progress, family users, and the owner admin surfaces needed
-to run it.
+The repo stands up the shared Calibre bookshelf, cross-device KOSync progress,
+family setup pages, book requests, and the owner admin surfaces needed to run
+it. Readers use the official Readest apps and `https://web.readest.com/`; this
+VM gives Readest the private OPDS catalog and KOSync endpoint.
 
 The repo is the source of truth. Runtime data and secrets live outside git:
 
@@ -14,7 +15,6 @@ The repo is the source of truth. Runtime data and secrets live outside git:
 - `/srv/books/log`: service logs, not committed
 - `/srv/books/calibre-web`: Calibre-Web settings DB, not committed
 - `/srv/books/kosync`: KOSync state, not committed
-- `/srv/books/readest`: Readest Web, Supabase, and object storage state, not committed
 - `/srv/books/config/accounts.sqlite`: family users and generated service credentials, not committed
 - `/srv/books/requests`: per-user book request queue, not committed
 - `/srv/books/inbox`: staged family uploads, not committed
@@ -26,10 +26,9 @@ The repo is the source of truth. Runtime data and secrets live outside git:
 - `calibre-web` listens only on `127.0.0.1:8083` and provides the owner-only web UI/reader.
 - `books-portal` listens only on `127.0.0.1:8090` and provides the owner home page, user setup pages, and request queue.
 - `books-kosync` runs the pinned official KOReader Sync Server image and listens only on `127.0.0.1:7200`.
-- `books-readest` runs the pinned Readest Web stack. The browser app is on `/library`; its Supabase API is on `/auth/v1` and `/rest/v1`.
-- `/catalog`, `/opds`, and `/get/...` pass through to Calibre so CrossPoint, Readest, and KOReader can use Calibre Basic auth. Use `/catalog` in setup pages because Readest also has its own `/opds` browser route.
+- `/catalog`, `/opds`, and `/get/...` pass through to Calibre so CrossPoint, Readest, and KOReader can use Calibre Basic auth.
 - `/kosync` passes through to KOSync with prefix stripping.
-- `/api/kosync` is a local bridge for Readest Web. It forwards Readest's browser-side KOSync calls to the local KOSync service, because this VM cannot call its own public `books.exe.xyz` URL.
+- `/library` redirects old links to `https://web.readest.com/`.
 - `/setup/<user>` reaches the portal and uses per-user Basic auth.
 - `/` is the owner portal and `/calibre/` is the owner Calibre-Web reader. Both require `X-ExeDev-Email: neil.skaria@gmail.com` from exe.dev.
 - Calibre-Web still uses its own username/password login.
@@ -62,14 +61,12 @@ The onboarding command installs:
 - official Calibre for Linux pinned by `CALIBRE_VERSION`
 - Calibre-Web pinned by `CALIBRE_WEB_VERSION`
 - official KOReader Sync Server pinned by `KOSYNC_IMAGE`
-- pinned Readest Web stack from `READEST_IMAGE`
 - Anna's Archive MCP/CLI `v0.0.5`
 - nginx config from `config/nginx/books.conf.template`
 - systemd unit from `config/systemd/books-calibre.service`
 - systemd unit from `config/systemd/books-calibre-web.service`
 - systemd unit from `config/systemd/books-portal.service`
 - systemd unit from `config/systemd/books-kosync.service`
-- systemd unit from `config/systemd/books-readest.service`
 - wrappers in `/opt/books/bin`
 - the repo-local Codex `$books` skill symlink
 
@@ -104,17 +101,22 @@ The legacy OPDS route still exists at `https://books.exe.xyz/opds` for apps that
 expect it. User-specific OPDS credentials come from
 `./scripts/books users show USER`.
 
-The Readest Web URL is:
+Readest Web is hosted by Readest:
 
 ```text
-https://books.exe.xyz/library
+https://web.readest.com/
 ```
 
-Readest progress sync still uses KOSync:
+In Readest, add this catalog and sync server:
 
 ```text
+https://books.exe.xyz/catalog
 https://books.exe.xyz/kosync
 ```
+
+Readest can sync the catalog, KOSync settings, and optionally credentials across
+signed-in devices. Credentials require turning on Readest's Credentials sync and
+setting a sync passphrase.
 
 The owner-only web reader is:
 

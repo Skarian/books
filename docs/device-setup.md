@@ -1,8 +1,8 @@
 # Device setup
 
 Books are downloaded from the shared OPDS catalog. Reading position syncs through
-the reader's own KOSync account. Readest Web is available at
-`https://books.exe.xyz/library`, but it still uses KOSync for progress.
+the reader's own KOSync account. Readest itself is not hosted on this VM; use
+the official apps and `https://web.readest.com/`.
 
 Do not copy random EPUB files between devices if progress matters. Use the OPDS
 download so every app starts from the same canonical file.
@@ -16,13 +16,12 @@ Each reader has these credentials:
 
 | Use | URL | Credential |
 |---|---|---|
-| Read in browser or Readest apps | `https://books.exe.xyz/library` | Readest email and password |
+| Read in browser or Readest apps | `https://web.readest.com/` | Your own Readest account |
 | Download books | `https://books.exe.xyz/catalog` | OPDS username and password |
 | Sync reading position | `https://books.exe.xyz/kosync` | KOSync username and password |
 
-The setup page for each reader shows that reader's Readest, OPDS, and KOSync
-credentials. Neil can print the same values with
-`./scripts/books users show USER`.
+The setup page for each reader shows that reader's OPDS and KOSync credentials.
+Neil can print the same values with `./scripts/books users show USER`.
 
 Use `https://books.exe.xyz/catalog` when the app accepts any OPDS URL. The
 legacy `/opds` path remains available for clients that expect that name.
@@ -46,8 +45,8 @@ before relying on it.
 
 Use Readest on the general-purpose devices.
 
-1. Open `https://books.exe.xyz/library`.
-2. Sign in with the reader's Readest email and password.
+1. Install Readest, or open `https://web.readest.com/`.
+2. Create a Readest account, or sign in to the account you already use.
 3. Open Settings, then Integrations.
 4. Under Content Sources, open OPDS Catalogs.
 5. Tap Add Catalog.
@@ -59,6 +58,10 @@ Use Readest on the general-purpose devices.
 11. Use `https://books.exe.xyz/kosync`.
 12. Sign in with the reader's KOSync username and password.
 13. After it connects, leave Checksum Method set to File Content.
+14. Open Account or Advanced Settings, then Manage Sync.
+15. Keep App settings and OPDS catalogs enabled.
+16. Turn on Credentials, set a sync passphrase, and use that same passphrase on
+    other Readest devices.
 
 Do not enter `/api`, `/v1`, or `/healthcheck` after the KOSync URL. The URL is
 exactly `https://books.exe.xyz/kosync`.
@@ -67,6 +70,12 @@ Readest exposes OPDS Catalogs and KOReader Sync under Settings, then
 Integrations. Each person enters their own KOSync credentials in the KOReader
 Sync form. That is user-accessible inside the app; it does not require an admin
 dashboard.
+
+Readest account sync should copy the catalog and KOSync settings to other
+signed-in Readest devices. The passwords only follow if Credentials sync is on.
+If a second device shows the catalog but asks for a password, enter the same
+Readest sync passphrase or re-enter the OPDS/KOSync credentials from the setup
+page.
 
 Do not turn on Readest WebDAV during the first pilot. It is not needed for book
 downloads or progress sync, and it can introduce a second progress path.
