@@ -15,7 +15,7 @@ The repo is the source of truth. Runtime data and secrets live outside git:
 - `/srv/books/log`: service logs, not committed
 - `/srv/books/calibre-web`: Calibre-Web settings DB, not committed
 - `/srv/books/kosync`: KOSync state, not committed
-- `/srv/books/config/accounts.sqlite`: family users and generated service credentials, not committed
+- `/srv/books/config/accounts.sqlite`: family users, generated service credentials, and per-user Hardcover tokens, not committed
 - `/srv/books/requests`: per-user book request queue, not committed
 - `/srv/books/inbox`: staged family uploads, not committed
 
@@ -26,6 +26,7 @@ The repo is the source of truth. Runtime data and secrets live outside git:
 - `calibre-web` listens only on `127.0.0.1:8083` and provides the owner-only web UI/reader.
 - `books-portal` listens only on `127.0.0.1:8090` and provides the owner home page, user setup pages, and request queue.
 - `books-kosync` runs the pinned official KOReader Sync Server image and listens only on `127.0.0.1:7200`.
+- `books-hardcover-sync.timer` checks each configured user's Hardcover Want to Read shelf every five minutes.
 - `/catalog`, `/opds`, and `/get/...` pass through to Calibre so CrossPoint, Readest, and KOReader can use Calibre Basic auth.
 - `/kosync` passes through to KOSync with prefix stripping.
 - `/library` redirects old links to `https://web.readest.com/`.
@@ -67,6 +68,7 @@ The onboarding command installs:
 - systemd unit from `config/systemd/books-calibre-web.service`
 - systemd unit from `config/systemd/books-portal.service`
 - systemd unit from `config/systemd/books-kosync.service`
+- systemd unit and timer from `config/systemd/books-hardcover-sync.*`
 - wrappers in `/opt/books/bin`
 - the repo-local Codex `$books` skill symlink
 
@@ -141,6 +143,7 @@ Use the `CALIBRE_WEB_ADMIN_USER` and `CALIBRE_WEB_ADMIN_PASSWORD` stored in `/et
 ./scripts/books users list
 ./scripts/books users rotate neil all
 ./scripts/books requests list
+./scripts/books hardcover status
 ```
 
 Import EPUBs:
@@ -173,6 +176,31 @@ Use Anna's Archive MCP/CLI after entering your member API key in onboarding:
 ```
 
 Only use acquisition tools for books you are legally permitted to access, such as public domain, Creative Commons, owned, or otherwise authorized works.
+
+## Hardcover Requests
+
+Hardcover can be the intake list. For each reader who wants automatic requests,
+store their Hardcover API token in the runtime accounts database:
+
+```bash
+printf '%s\n' 'Bearer ...' | ./scripts/books hardcover set-token neil
+./scripts/books hardcover status
+```
+
+The token is not written to git. The sync loop reads that user's Want to Read
+books, searches Anna's Archive for an English EPUB, imports the first strong
+match into Calibre, then moves the Hardcover item to Currently Reading. Anna's
+download cap is shared across the whole VM and defaults to 15 downloads per UTC
+day:
+
+```bash
+./scripts/books hardcover sync --dry-run --user neil --limit 1
+./scripts/books hardcover sync --user neil
+```
+
+The systemd timer runs the same sync every five minutes. Request and fulfillment
+records are kept under `/srv/books/requests/<user>/` and in
+`/srv/books/config/accounts.sqlite`.
 
 ## References
 

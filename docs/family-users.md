@@ -35,7 +35,8 @@ The helper creates the schema from git-tracked code. Generated service state is
 rebuilt from the registry.
 
 The registry stores service usernames, roles, status, and the generated Books
-login for each reader. The database lives under
+login for each reader. If Hardcover requests are enabled for a reader, the same
+database stores that reader's Hardcover API token. The database lives under
 `/srv/books/config`, not in git. Keep it with the runtime backup set and rotate a
 reader if their login is exposed. KOSync also needs the derived userkey
 that its server stores and compares during auth. Setup pages show the raw
@@ -45,7 +46,7 @@ store.
 
 ## User commands
 
-The repo will expose the owner workflow through `scripts/books`:
+The repo exposes the owner workflow through `scripts/books`:
 
 ```bash
 ./scripts/books users list
@@ -55,6 +56,9 @@ The repo will expose the owner workflow through `scripts/books`:
 ./scripts/books users rotate USER [login|all]
 ./scripts/books users show USER
 ./scripts/books users reconcile
+./scripts/books hardcover set-token USER
+./scripts/books hardcover clear-token USER
+./scripts/books hardcover status
 ```
 
 `disable` revokes access and keeps the user's state. `purge` removes the user's
@@ -130,6 +134,16 @@ Credentials sync and sets a Readest sync passphrase.
 The page should make clear that KOSync syncs reading position only. Readest
 highlights, notes, bookmarks, collections, and ratings are not part of the core
 family sync path.
+
+## Hardcover intake
+
+Hardcover Want to Read can be used as a per-user request list. When a user's
+token is configured, the sync timer checks their Want to Read shelf every five
+minutes. Fulfilled items are downloaded through Anna's Archive, imported into the
+shared Calibre library, and moved to Currently Reading in Hardcover.
+
+The Anna daily cap is global across all users. A family member's Hardcover token
+only grants access to that person's shelves; it is not reused for other readers.
 
 ## Uploads
 

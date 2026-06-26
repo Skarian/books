@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMMAND="${1:-}"
 
 case "${COMMAND}" in
-  health|verify|web-url|opds-url|kosync-url|proxy-commands|users|requests)
+  health|verify|web-url|opds-url|kosync-url|proxy-commands|users|requests|hardcover)
     if [[ ${EUID} -ne 0 && ! -r /etc/books/books.env ]]; then
       exec sudo "$0" "$@"
     fi
@@ -26,6 +26,7 @@ Commands:
   anna ARGS...           Run Anna's Archive MCP/CLI through the configured env
   users ARGS...          Manage family users and credentials
   requests ARGS...       Review book requests
+  hardcover ARGS...      Sync Hardcover Want to Read items into the library
   web-url                Print the owner-only calibre-web URL
   opds-url               Print the OPDS URL for Crosspoint
   kosync-url             Print the KOSync URL for reading progress
@@ -157,6 +158,10 @@ PY
   requests)
     shift
     sudo /opt/books/bin/books-users requests "$@"
+    ;;
+  hardcover)
+    shift
+    sudo /opt/books/bin/books-hardcover-sync "$@"
     ;;
   web-url)
     source /etc/books/books.env

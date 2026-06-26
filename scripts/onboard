@@ -11,6 +11,8 @@ SYSTEMD_UNIT=/etc/systemd/system/books-calibre.service
 CALIBRE_WEB_SYSTEMD_UNIT=/etc/systemd/system/books-calibre-web.service
 PORTAL_SYSTEMD_UNIT=/etc/systemd/system/books-portal.service
 KOSYNC_SYSTEMD_UNIT=/etc/systemd/system/books-kosync.service
+HARDCOVER_SYSTEMD_UNIT=/etc/systemd/system/books-hardcover-sync.service
+HARDCOVER_SYSTEMD_TIMER=/etc/systemd/system/books-hardcover-sync.timer
 ORIGINAL_ARGS=("$@")
 
 if [[ ${EUID} -ne 0 ]]; then
@@ -45,6 +47,7 @@ Installs and configures the personal books service:
   - books-calibre-web systemd service
   - books-portal systemd service
   - books-kosync systemd service
+  - books-hardcover-sync systemd timer
   - nginx gate on BOOKS_PROXY_PORT
   - repo-local Codex books skill symlink
 EOF
@@ -218,6 +221,7 @@ write_env() {
     printf 'ANNAS_BASE_URL=%s\n' "$(shell_quote "${ANNAS_BASE_URL}")"
     printf 'ANNAS_SECRET_KEY=%s\n' "$(shell_quote "${ANNAS_SECRET_KEY}")"
     printf 'ANNAS_DOWNLOAD_PATH=%s\n' "$(shell_quote "${ANNAS_DOWNLOAD_PATH}")"
+    printf 'HARDCOVER_DAILY_DOWNLOAD_CAP=%s\n' "$(shell_quote "${HARDCOVER_DAILY_DOWNLOAD_CAP}")"
     printf 'BOOKS_DEFAULT_LANGUAGE=%s\n' "$(shell_quote "${BOOKS_DEFAULT_LANGUAGE}")"
     printf 'BOOKS_DEFAULT_TAGS=%s\n' "$(shell_quote "${BOOKS_DEFAULT_TAGS}")"
   } > "${ENV_FILE}"
@@ -483,6 +487,7 @@ install_wrappers() {
   install -m 0755 "${ROOT_DIR}/bin/books-sync-fixture" "${OPT_BIN}/books-sync-fixture"
   install -m 0755 "${ROOT_DIR}/bin/books-users" "${OPT_BIN}/books-users"
   install -m 0755 "${ROOT_DIR}/bin/books-portal" "${OPT_BIN}/books-portal"
+  install -m 0755 "${ROOT_DIR}/bin/books-hardcover-sync" "${OPT_BIN}/books-hardcover-sync"
 }
 
 retire_legacy_readest_stack() {
@@ -506,6 +511,8 @@ install_services() {
   install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre-web.service" "${CALIBRE_WEB_SYSTEMD_UNIT}"
   install -m 0644 "${ROOT_DIR}/config/systemd/books-portal.service" "${PORTAL_SYSTEMD_UNIT}"
   install -m 0644 "${ROOT_DIR}/config/systemd/books-kosync.service" "${KOSYNC_SYSTEMD_UNIT}"
+  install -m 0644 "${ROOT_DIR}/config/systemd/books-hardcover-sync.service" "${HARDCOVER_SYSTEMD_UNIT}"
+  install -m 0644 "${ROOT_DIR}/config/systemd/books-hardcover-sync.timer" "${HARDCOVER_SYSTEMD_TIMER}"
   render_template "${ROOT_DIR}/config/nginx/books.conf.template" "${NGINX_CONF}"
   if [[ -L /etc/nginx/sites-enabled/default ]]; then
     rm -f /etc/nginx/sites-enabled/default
@@ -513,11 +520,12 @@ install_services() {
   systemctl daemon-reload
   nginx -t
   if [[ "${skip_start}" != true ]]; then
-    systemctl enable books-calibre books-calibre-web books-portal books-kosync nginx
+    systemctl enable books-calibre books-calibre-web books-portal books-kosync books-hardcover-sync.timer nginx
     systemctl restart books-calibre
     systemctl restart books-calibre-web
     systemctl restart books-portal
     systemctl restart books-kosync
+    systemctl start books-hardcover-sync.timer
     systemctl enable --now nginx
     systemctl reload nginx
   fi
@@ -549,7 +557,7 @@ BOOKS_PORTAL_PORT="${BOOKS_PORTAL_PORT:-8090}"
 
 ask CALIBRE_PORT "Calibre localhost port" "${CALIBRE_PORT:-8080}"
 ask CALIBRE_VERSION "Calibre version" "${CALIBRE_VERSION:-9.9.0}"
-ask CALIBRE_ADMIN_USER "Calibre admin user" "${CALIBRE_ADMIN_USER:-neil}"
+ask CALIBRE_ADMIN_USER "Calibre admin user" "${CALIBRE_ADMIN_USER:-books_admin}"
 ask_secret CALIBRE_ADMIN_PASSWORD "Calibre admin password" "${CALIBRE_ADMIN_PASSWORD:-}"
 ask CALIBRE_OPDS_USER "Crosspoint/OPDS user" "${CALIBRE_OPDS_USER:-crosspoint}"
 ask_secret CALIBRE_OPDS_PASSWORD "Default OPDS password" "${CALIBRE_OPDS_PASSWORD:-}"
@@ -560,6 +568,7 @@ ask ANNAS_BASE_URL "Anna's Archive mirror host" "${ANNAS_BASE_URL:-annas-archive
 ask_optional_secret ANNAS_SECRET_KEY "Anna's Archive API key" "${ANNAS_SECRET_KEY:-}"
 
 ANNAS_DOWNLOAD_PATH="${ANNAS_DOWNLOAD_PATH:-${BOOKS_DOWNLOAD_DIR}}"
+HARDCOVER_DAILY_DOWNLOAD_CAP="${HARDCOVER_DAILY_DOWNLOAD_CAP:-15}"
 BOOKS_DEFAULT_LANGUAGE="${BOOKS_DEFAULT_LANGUAGE:-eng}"
 BOOKS_DEFAULT_TAGS="${BOOKS_DEFAULT_TAGS:-agent-imported}"
 CALIBRE_WEB_DIR="${CALIBRE_WEB_DIR:-${BOOKS_DATA_DIR}/calibre-web}"

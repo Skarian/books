@@ -1,0 +1,634 @@
+#!/usr/bin/env python3
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ENV_FILE = Path("/etc/books/books.env")
+GRAPHQL_URL = "https://api.hardcover.app/v1/graphql"
+WANT_TO_READ_STATUS = 1
+CURRENTLY_READING_STATUS = 2
+
+
+def load_env():
+    env = {}
+    if ENV_FILE.exists():
+        for line in ENV_FILE.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] == "'":
+                value = value[1:-1].replace("'\\''", "'")
+            env[key] = value
+    return env
+
+
+ENV = load_env()
+CONFIG_DIR = Path(ENV.get("BOOKS_CONFIG_DIR", "/srv/books/config"))
+ACCOUNTS_DB = Path(ENV.get("BOOKS_ACCOUNTS_DB", str(CONFIG_DIR / "accounts.sqlite")))
+REQUESTS_DIR = Path(ENV.get("BOOKS_REQUESTS_DIR", "/srv/books/requests"))
+DOWNLOAD_DIR = Path(ENV.get("BOOKS_DOWNLOAD_DIR", "/srv/books/downloads"))
+LOG_DIR = Path(ENV.get("BOOKS_LOG_DIR", "/srv/books/log")) / "hardcover"
+DAILY_CAP = int(ENV.get("HARDCOVER_DAILY_DOWNLOAD_CAP", "15"))
+BOOKS_ANNAS = ENV.get("BOOKS_ANNAS_BIN", "/opt/books/bin/books-annas")
+BOOKS_IMPORT = ENV.get("BOOKS_IMPORT_BIN", "/opt/books/bin/books-import")
+
+
+class AnnaAuthError(RuntimeError):
+    pass
+
+
+def now():
+    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
+
+
+def today():
+    return dt.datetime.now(dt.UTC).date().isoformat()
+
+
+def db():
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(ACCOUNTS_DB)
+    conn.row_factory = sqlite3.Row
+    migrate(conn)
+    return conn
+
+
+def migrate(conn):
+    conn.execute(
+        """
+        create table if not exists accounts (
+          slug text primary key,
+          display_name text not null,
+          email text,
+          status text not null default 'active',
+          roles text not null default 'reader',
+          login_user text unique,
+          login_password text,
+          opds_user text not null unique,
+          opds_password text not null,
+          kosync_user text not null unique,
+          kosync_password text not null,
+          kosync_userkey text not null,
+          setup_user text not null unique,
+          setup_password text not null,
+          created_at text not null,
+          updated_at text not null,
+          disabled_at text,
+          purged_at text
+        )
+        """
+    )
+    account_cols = {row["name"] for row in conn.execute("pragma table_info(accounts)").fetchall()}
+    for column, coltype in (
+        ("hardcover_token", "text"),
+        ("hardcover_user_id", "integer"),
+        ("hardcover_username", "text"),
+        ("hardcover_sync_enabled", "integer not null default 0"),
+        ("hardcover_updated_at", "text"),
+    ):
+        if column not in account_cols:
+            conn.execute(f"alter table accounts add column {column} {coltype}")
+    conn.execute(
+        """
+        create table if not exists hardcover_processed (
+          user_slug text not null,
+          user_book_id integer not null,
+          hardcover_book_id integer,
+          title text not null,
+          author text,
+          status text not null,
+          request_path text,
+          selected_md5 text,
+          selected_title text,
+          selected_format text,
+          selected_language text,
+          download_path text,
+          imported_at text,
+          moved_at text,
+          error text,
+          created_at text not null,
+          updated_at text not null,
+          primary key(user_slug, user_book_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        create table if not exists hardcover_daily_downloads (
+          day text primary key,
+          count integer not null default 0,
+          updated_at text not null
+        )
+        """
+    )
+    conn.commit()
+
+
+def run(cmd, check=True):
+    return subprocess.run(cmd, text=True, check=check, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+def graphql(token, query, variables=None):
+    if not token.startswith("Bearer "):
+        token = f"Bearer {token}"
+    req = urllib.request.Request(
+        GRAPHQL_URL,
+        data=json.dumps({"query": query, "variables": variables or {}}).encode(),
+        headers={"Authorization": token, "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")
+        raise RuntimeError(f"Hardcover HTTP {exc.code}: {detail}") from exc
+    if payload.get("errors"):
+        raise RuntimeError(json.dumps(payload["errors"], indent=2))
+    return payload["data"]
+
+
+def normalize_token(value):
+    value = value.strip()
+    if not value:
+        raise SystemExit("No Hardcover token provided.")
+    if not value.startswith("Bearer "):
+        value = f"Bearer {value}"
+    return value
+
+
+def verify_token(token):
+    query = """
+    query {
+      me {
+        id
+        username
+      }
+    }
+    """
+    me = graphql(token, query)["me"]
+    if not me:
+        raise SystemExit("Hardcover token did not return a user.")
+    return me[0]
+
+
+def set_token(args):
+    if args.token_file:
+        token = Path(args.token_file).read_text()
+    elif not sys.stdin.isatty():
+        token = sys.stdin.read()
+    else:
+        token = input("Hardcover API token: ")
+    token = normalize_token(token)
+    profile = verify_token(token)
+    conn = db()
+    row = conn.execute("select slug from accounts where slug=?", (args.user,)).fetchone()
+    if not row:
+        raise SystemExit(f"No account named {args.user}.")
+    conn.execute(
+        """
+        update accounts
+        set hardcover_token=?, hardcover_user_id=?, hardcover_username=?,
+            hardcover_sync_enabled=1, hardcover_updated_at=?, updated_at=?
+        where slug=?
+        """,
+        (token, profile["id"], profile["username"], now(), now(), args.user),
+    )
+    conn.commit()
+    conn.close()
+    print(f"Hardcover sync enabled for {args.user} as {profile['username']} ({profile['id']}).")
+
+
+def clear_token(args):
+    conn = db()
+    conn.execute(
+        """
+        update accounts
+        set hardcover_token=null, hardcover_user_id=null, hardcover_username=null,
+            hardcover_sync_enabled=0, hardcover_updated_at=?, updated_at=?
+        where slug=?
+        """,
+        (now(), now(), args.user),
+    )
+    conn.commit()
+    conn.close()
+    print(f"Hardcover sync disabled for {args.user}.")
+
+
+def status(args):
+    conn = db()
+    if args.user:
+        rows = conn.execute("select * from accounts where slug=? order by slug", (args.user,)).fetchall()
+    else:
+        rows = conn.execute("select * from accounts order by slug").fetchall()
+    for row in rows:
+        enabled = "enabled" if row["hardcover_sync_enabled"] and row["hardcover_token"] else "disabled"
+        name = row["hardcover_username"] or "-"
+        print(f"{row['slug']}\t{enabled}\t{name}")
+    cap = daily_count(conn)
+    print(f"daily_downloads\t{cap}/{DAILY_CAP}\t{today()}")
+    conn.close()
+
+
+def fetch_want_to_read(token):
+    query = """
+    query WantToRead {
+      me {
+        id
+        username
+        user_books(
+          where: {status_id: {_eq: 1}},
+          order_by: {created_at: asc},
+          limit: 100
+        ) {
+          id
+          book_id
+          created_at
+          book {
+            id
+            title
+            slug
+            contributions {
+              author {
+                name
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    me = graphql(token, query)["me"]
+    if not me:
+        return []
+    return me[0]["user_books"]
+
+
+def move_to_currently_reading(token, user_book_id):
+    mutation = """
+    mutation MoveUserBook($id: Int!, $object: UserBookUpdateInput!) {
+      update_user_book(id: $id, object: $object) {
+        id
+      }
+    }
+    """
+    data = graphql(token, mutation, {"id": int(user_book_id), "object": {"status_id": CURRENTLY_READING_STATUS}})
+    return data["update_user_book"]
+
+
+def authors(book):
+    names = []
+    for contribution in book.get("contributions") or []:
+        author = contribution.get("author") or {}
+        name = (author.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return ", ".join(names)
+
+
+def safe_filename(value):
+    value = re.sub(r"[^A-Za-z0-9._ -]+", "", value).strip()
+    value = re.sub(r"\s+", " ", value)
+    value = value.replace("/", "-")
+    return value[:120] or "book"
+
+
+def parse_anna_blocks(output):
+    blocks = []
+    current = {}
+    for raw in output.splitlines():
+        line = raw.strip()
+        if line.startswith("Book ") and line.endswith(":"):
+            if current:
+                blocks.append(current)
+            current = {}
+            continue
+        if ":" not in line or not current and not line.startswith("Title:"):
+            continue
+        key, value = line.split(":", 1)
+        current[key.lower()] = value.strip()
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def score_candidate(item, requested_title, requested_author):
+    fmt = item.get("format", "").lower()
+    language = item.get("language", "").lower()
+    title = item.get("title", "").lower()
+    authors_text = item.get("authors", "").lower()
+    score = 0
+    if fmt == "epub":
+        score += 100
+    elif fmt in ("azw3", "mobi"):
+        score += 20
+    else:
+        score -= 100
+    if language in ("english", "eng", "en"):
+        score += 50
+    elif language:
+        score -= 50
+    for token in re.findall(r"[a-z0-9]+", requested_title.lower()):
+        if len(token) > 3 and token in title:
+            score += 5
+    for token in re.findall(r"[a-z0-9]+", requested_author.lower()):
+        if len(token) > 3 and token in authors_text:
+            score += 5
+    if "hash" in item:
+        score += 1
+    return score
+
+
+def find_anna_candidate(title, author):
+    query = f"{title} {author} epub english".strip()
+    result = run([BOOKS_ANNAS, "book-search", query], check=False)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or result.stdout or f"Anna search failed for {title}")
+    blocks = parse_anna_blocks(result.stdout)
+    candidates = [item for item in blocks if item.get("hash")]
+    candidates.sort(key=lambda item: score_candidate(item, title, author), reverse=True)
+    if not candidates or score_candidate(candidates[0], title, author) < 50:
+        raise RuntimeError(f"No English EPUB candidate found for {title}")
+    return candidates[0], result.stdout
+
+
+def request_path(user_slug, user_book_id):
+    return REQUESTS_DIR / user_slug / f"hardcover-{user_book_id}.json"
+
+
+def write_request(user_slug, user_book, title, author):
+    path = request_path(user_slug, user_book["id"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "status": "approved",
+        "source": "hardcover",
+        "user": user_slug,
+        "title": title,
+        "author": author,
+        "hardcover_user_book_id": user_book["id"],
+        "hardcover_book_id": user_book.get("book_id"),
+        "created_at": now(),
+    }
+    path.write_text(json.dumps(payload, indent=2))
+    return path
+
+
+def processed_row(conn, user_slug, user_book_id):
+    return conn.execute(
+        "select * from hardcover_processed where user_slug=? and user_book_id=?",
+        (user_slug, int(user_book_id)),
+    ).fetchone()
+
+
+def upsert_processed(conn, user_slug, user_book, title, author, status_value, **fields):
+    existing = processed_row(conn, user_slug, user_book["id"])
+    values = {
+        "hardcover_book_id": user_book.get("book_id"),
+        "title": title,
+        "author": author,
+        "status": status_value,
+        "updated_at": now(),
+        **fields,
+    }
+    if existing:
+        assignments = ", ".join(f"{key}=?" for key in values)
+        conn.execute(
+            f"update hardcover_processed set {assignments} where user_slug=? and user_book_id=?",
+            [*values.values(), user_slug, int(user_book["id"])],
+        )
+    else:
+        conn.execute(
+            """
+            insert into hardcover_processed(
+              user_slug, user_book_id, hardcover_book_id, title, author, status,
+              request_path, selected_md5, selected_title, selected_format,
+              selected_language, download_path, imported_at, moved_at, error,
+              created_at, updated_at
+            ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                user_slug,
+                int(user_book["id"]),
+                values.get("hardcover_book_id"),
+                title,
+                author,
+                status_value,
+                fields.get("request_path"),
+                fields.get("selected_md5"),
+                fields.get("selected_title"),
+                fields.get("selected_format"),
+                fields.get("selected_language"),
+                fields.get("download_path"),
+                fields.get("imported_at"),
+                fields.get("moved_at"),
+                fields.get("error"),
+                now(),
+                now(),
+            ),
+        )
+    conn.commit()
+
+
+def daily_count(conn):
+    row = conn.execute("select count from hardcover_daily_downloads where day=?", (today(),)).fetchone()
+    return int(row["count"]) if row else 0
+
+
+def increment_daily(conn):
+    conn.execute(
+        """
+        insert into hardcover_daily_downloads(day, count, updated_at)
+        values(?, 1, ?)
+        on conflict(day) do update set count=count + 1, updated_at=excluded.updated_at
+        """,
+        (today(), now()),
+    )
+    conn.commit()
+
+
+def cap_available(conn):
+    return DAILY_CAP <= 0 or daily_count(conn) < DAILY_CAP
+
+
+def download_and_import(md5, filename):
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    download_path = DOWNLOAD_DIR / filename
+    downloaded = False
+    if not download_path.exists():
+        result = run([BOOKS_ANNAS, "book-download", md5, filename], check=False)
+        if result.returncode != 0:
+            detail = result.stderr or result.stdout or f"Anna download failed for {md5}"
+            if "username/password combination" in detail.lower() or "incorrect" in detail.lower():
+                raise AnnaAuthError(detail.strip())
+            raise RuntimeError(detail)
+        downloaded = True
+        if not download_path.exists():
+            matches = list(DOWNLOAD_DIR.glob(filename))
+            if matches:
+                download_path = matches[0]
+        if not download_path.exists():
+            raise RuntimeError(f"Anna download completed but {download_path} was not found.")
+    result = run([BOOKS_IMPORT, str(download_path)], check=False)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or result.stdout or f"Calibre import failed for {download_path}")
+    return download_path, downloaded
+
+
+def sync_user(conn, row, dry_run=False, limit=None):
+    items = fetch_want_to_read(row["hardcover_token"])
+    print(f"{row['slug']}: {len(items)} Want to Read item(s)")
+    processed = 0
+    for user_book in items:
+        if limit is not None and processed >= limit:
+            break
+        book = user_book.get("book") or {}
+        title = (book.get("title") or "").strip()
+        author = authors(book)
+        if not title:
+            continue
+        existing = processed_row(conn, row["slug"], user_book["id"])
+        if existing and existing["status"] in ("fulfilled", "moved", "skipped"):
+            continue
+        if not cap_available(conn):
+            print(f"Daily Anna download cap reached: {daily_count(conn)}/{DAILY_CAP}")
+            break
+        path = write_request(row["slug"], user_book, title, author)
+        upsert_processed(conn, row["slug"], user_book, title, author, "approved", request_path=str(path))
+        print(f"{row['slug']}: searching {title}" + (f" by {author}" if author else ""))
+        if dry_run:
+            candidate, _ = find_anna_candidate(title, author)
+            print(f"dry-run candidate: {candidate.get('hash')} {candidate.get('format')} {candidate.get('language')} {candidate.get('title')}")
+            processed += 1
+            continue
+        try:
+            candidate, _search_output = find_anna_candidate(title, author)
+            filename = safe_filename(f"{title} - {author or 'Unknown'} - hardcover-{user_book['id']}") + ".epub"
+            upsert_processed(
+                conn,
+                row["slug"],
+                user_book,
+                title,
+                author,
+                "downloading",
+                request_path=str(path),
+                selected_md5=candidate.get("hash"),
+                selected_title=candidate.get("title"),
+                selected_format=candidate.get("format"),
+                selected_language=candidate.get("language"),
+            )
+            download_path, downloaded = download_and_import(candidate["hash"], filename)
+            if downloaded:
+                increment_daily(conn)
+            moved = move_to_currently_reading(row["hardcover_token"], user_book["id"])
+            moved_at = now() if moved.get("id") else None
+            upsert_processed(
+                conn,
+                row["slug"],
+                user_book,
+                title,
+                author,
+                "fulfilled",
+                request_path=str(path),
+                selected_md5=candidate.get("hash"),
+                selected_title=candidate.get("title"),
+                selected_format=candidate.get("format"),
+                selected_language=candidate.get("language"),
+                download_path=str(download_path),
+                imported_at=now(),
+                moved_at=moved_at,
+            )
+            data = json.loads(path.read_text())
+            data.update(
+                {
+                    "status": "fulfilled",
+                    "selected_md5": candidate.get("hash"),
+                    "selected_title": candidate.get("title"),
+                    "download_path": str(download_path),
+                    "fulfilled_at": now(),
+                    "hardcover_status_id": CURRENTLY_READING_STATUS,
+                }
+            )
+            path.write_text(json.dumps(data, indent=2))
+            print(f"fulfilled: {title}")
+            processed += 1
+        except AnnaAuthError as exc:
+            upsert_processed(conn, row["slug"], user_book, title, author, "error", request_path=str(path), error=str(exc))
+            data = json.loads(path.read_text())
+            data.update({"status": "error", "error": str(exc), "updated_at": now()})
+            path.write_text(json.dumps(data, indent=2))
+            print(f"anna credential error: {exc}", file=sys.stderr)
+            break
+        except Exception as exc:
+            upsert_processed(conn, row["slug"], user_book, title, author, "error", request_path=str(path), error=str(exc))
+            data = json.loads(path.read_text())
+            data.update({"status": "error", "error": str(exc), "updated_at": now()})
+            path.write_text(json.dumps(data, indent=2))
+            print(f"error: {title}: {exc}", file=sys.stderr)
+            processed += 1
+    return processed
+
+
+def sync(args):
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    conn = db()
+    if args.user:
+        rows = conn.execute(
+            "select * from accounts where slug=? and status='active'",
+            (args.user,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            select * from accounts
+            where status='active'
+              and hardcover_sync_enabled=1
+              and hardcover_token is not null
+            order by slug
+            """
+        ).fetchall()
+    if not rows:
+        print("No active Hardcover sync users.")
+        return
+    total = 0
+    for row in rows:
+        if not row["hardcover_token"]:
+            print(f"{row['slug']}: no Hardcover token configured")
+            continue
+        total += sync_user(conn, row, dry_run=args.dry_run, limit=args.limit)
+    print(f"processed {total} item(s)")
+    conn.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Sync Hardcover Want to Read items into the Books library.")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    setp = sub.add_parser("set-token")
+    setp.add_argument("user")
+    setp.add_argument("--token-file")
+    setp.set_defaults(func=set_token)
+    clear = sub.add_parser("clear-token")
+    clear.add_argument("user")
+    clear.set_defaults(func=clear_token)
+    stat = sub.add_parser("status")
+    stat.add_argument("user", nargs="?")
+    stat.set_defaults(func=status)
+    syncp = sub.add_parser("sync")
+    syncp.add_argument("--user")
+    syncp.add_argument("--dry-run", action="store_true")
+    syncp.add_argument("--limit", type=int)
+    syncp.set_defaults(func=sync)
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

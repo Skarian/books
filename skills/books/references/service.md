@@ -14,6 +14,7 @@
 - Calibre-Web service: `books-calibre-web`
 - Portal service: `books-portal`
 - KOSync service: `books-kosync`
+- Hardcover request sync timer: `books-hardcover-sync.timer`
 - Public host: `books.exe.xyz`
 
 ## Routing
@@ -77,6 +78,23 @@ The installed binary is `/opt/books/bin/annas-mcp`, wrapped by `/opt/books/bin/b
 The wrapper sources `/etc/books/books.env` and runs the binary with `ANNAS_SECRET_KEY`, `ANNAS_DOWNLOAD_PATH`, and `ANNAS_BASE_URL`.
 
 Respect copyright and terms. If a requested title is not clearly public domain, Creative Commons, owned, or otherwise authorized, ask for confirmation before download.
+
+## Hardcover Requests
+
+Hardcover Want to Read is the automatic intake queue. Configure it per user:
+
+```bash
+printf '%s\n' 'Bearer ...' | ./scripts/books hardcover set-token USER
+./scripts/books hardcover status
+./scripts/books hardcover sync --dry-run --user USER --limit 1
+./scripts/books hardcover sync --user USER
+```
+
+The token is stored in `/srv/books/config/accounts.sqlite`, outside git. The
+sync loop runs every five minutes through `books-hardcover-sync.timer`, searches
+Anna's Archive for English EPUBs, imports fulfilled books into Calibre, and moves
+fulfilled Hardcover items from Want to Read to Currently Reading. The Anna cap is
+global across all users and defaults to 15 downloads per UTC day.
 
 ## Family Users
 
