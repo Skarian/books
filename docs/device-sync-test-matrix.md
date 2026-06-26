@@ -64,7 +64,7 @@ Pass only if downloaded EPUB bytes match the canonical fixture. If a client rewr
 | Public healthcheck | `https://books.exe.xyz/kosync/healthcheck` returns healthy JSON |  |  |
 | Registration bootstrap | Sync-only user can be created during onboarding |  |  |
 | Registration locked | New public registration fails after bootstrap |  |  |
-| Auth | Existing sync-only user authenticates |  |  |
+| Auth | Existing per-reader user authenticates |  |  |
 | PUT progress | Fixture progress can be uploaded |  |  |
 | GET progress | Same fixture progress can be fetched |  |  |
 | Restart service | Existing progress remains |  |  |
@@ -74,9 +74,25 @@ Pass only if downloaded EPUB bytes match the canonical fixture. If a client rewr
 
 | Client | Server URL | Username | Matching setting | Expected |
 |---|---|---|---|---|
-| CrossPoint | `https://books.exe.xyz/kosync` | sync-only user | Binary/file content if available | Auth works |
-| KOReader | `https://books.exe.xyz/kosync` | sync-only user | Binary | Auth works |
-| Readest | `https://books.exe.xyz/kosync` | sync-only user | File Content | Auth works |
+| CrossPoint | `https://books.exe.xyz/kosync` | per-reader user | Binary/file content if available | Auth works |
+| KOReader | `https://books.exe.xyz/kosync` | per-reader user | Binary | Auth works |
+| Readest | `https://books.exe.xyz/kosync` | per-reader user | File Content | Auth works |
+
+## Family Account Lifecycle
+
+Use this section before enabling family access. It validates `docs/family-multi-user-admin-plan.md`.
+
+| Test | Expected | Pass | Notes |
+|---|---|---|---|
+| Create user | OPDS, KOSync, and WebDAV credentials are created for only that user |  |  |
+| Reconcile users | Derived Calibre/nginx/WebDAV/KOSync/setup state is rebuilt without rotating passwords |  |  |
+| Rotate one user's KOSync password | New password works, old password fails, other users unaffected |  |  |
+| Disable user | OPDS, KOSync, WebDAV, setup page, and upload access fail for that user |  |  |
+| Purge user | User state is removed or archived without touching shared Calibre books |  |  |
+| Setup page privacy | User sees only their own credentials; owner/admin credentials never appear |  |  |
+| Setup page caching | Credential pages send no-store/no-referrer headers and no secrets in URLs |  |  |
+| Owner admin panel | Owner can add/disable/rotate users; non-owner cannot access admin actions |  |  |
+| Audit log | User mutations are recorded with actor, action, target, and timestamp |  |  |
 
 ## Core Progress Round Trips
 
@@ -99,6 +115,17 @@ Landing precision choices: `same paragraph`, `same page`, `within 1-3 pages`, `c
 | Kobo KOReader | CrossPoint |  |  |  |  | Optional |
 | CrossPoint | Kobo KOReader |  |  |  |  | Optional |
 
+## Family Progress Isolation
+
+Target: two people can read the same canonical EPUB without overwriting each other's progress.
+
+| User A app | User B app | Fixture | Same EPUB identity | A progress preserved | B progress preserved | Notes |
+|---|---|---|---|---|---|---|
+| Readest iPad | Readest Android |  |  |  |  | Separate KOSync users |
+| Readest iPad | CrossPoint |  |  |  |  | Separate KOSync users |
+| KOReader Android | Readest Windows |  |  |  |  | Separate KOSync users |
+| CrossPoint | KOReader Desktop |  |  |  |  | Separate KOSync users |
+
 ## CrossPoint Precision Detail
 
 Record enough detail to decide whether the X4 experience is pleasant.
@@ -120,6 +147,30 @@ Target: no Readest cloud account. Progress, location, highlights, notes, covers,
 | Android Readest | Mac Readest |  |  |  |  |  |  |
 | Mac Readest | Windows Readest |  |  |  |  |  |  |
 | Windows Readest | iPad Readest |  |  |  |  |  |  |
+
+## Readest WebDAV User Isolation
+
+Target: WebDAV state for one user is not visible to or modified by another user.
+
+| Test | Expected | Pass | Notes |
+|---|---|---|---|
+| User A WebDAV auth | User A reaches only User A root |  |  |
+| User B WebDAV auth | User B reaches only User B root |  |  |
+| Cross-user path traversal | Parent-directory and symlink traversal fail |  |  |
+| User A highlights | User B Readest does not receive User A highlights |  |  |
+| Disable User A | User A old WebDAV credentials fail; User B unaffected |  |  |
+
+## Family Upload Staging
+
+Default: family uploads are disabled. If enabled, they go to quarantine and require owner import.
+
+| Test | Expected | Pass | Notes |
+|---|---|---|---|
+| Upload disabled user | Upload UI/API is hidden or denied |  |  |
+| Upload enabled user | EPUB lands in `/srv/books/inbox/<user>/`, not `/srv/books/library` |  |  |
+| Non-EPUB upload | Rejected or marked for owner conversion review |  |  |
+| Owner approval import | Approved EPUB imports with uploader/source tags |  |  |
+| Direct library mutation | Family user cannot edit metadata, delete books, or overwrite formats |  |  |
 
 ## Optional Stock Kobo Sidecar
 
@@ -145,4 +196,6 @@ Target: KEPUB lands within a few pages. Regular EPUB chapter-boundary sync is a 
 | Restore KOSync state | KOReader/CrossPoint/Readest progress returns |  |  |
 | Restore Readest WebDAV data | Readest state returns |  |  |
 | Restore sidecar DB and copied library | Optional Kobo/web state returns |  |  |
+| Restore family account registry | Users, statuses, roles, and service usernames return |  |  |
 | Re-run onboarding on fresh VM | Services and config are recreated from repo |  |  |
+| Run users reconcile after restore | Derived auth/config/setup pages are rebuilt from runtime registry |  |  |

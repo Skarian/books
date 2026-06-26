@@ -8,5 +8,9 @@
 - Add Readest WebDAV after KOSync works; WebDAV is for Readest state, not the CrossPoint/KOReader bridge.
 - Use Readest on Android, iPad, macOS, and Windows; use KOReader anywhere it is the better device app.
 - Treat stock Kobo as optional. Evaluate BookOrbit, Komga, and Grimmory as copied-library sidecars only after the core lane passes.
+- For family support, start from `docs/family-multi-user-admin-plan.md`.
+- Family mode means shared books but per-user OPDS, KOSync, WebDAV, setup page, and upload permissions.
+- Do not enable family uploads directly into `/srv/books/library`; stage uploads for owner review.
+- Build `scripts/books users ...` and reconcile before building the owner-only admin panel.
 - Check OPDS, EPUB import, auth, metadata, and library-storage requirements before changing the running service.
 - Preserve reproducibility: any install/config should be represented by repo scripts/templates, not manual VM state.

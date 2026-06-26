@@ -14,6 +14,8 @@ The recommended architecture is viable enough to implement and test:
 
 This changes the earlier framing. Readest is not just a separate WebDAV lane: current Readest can directly talk to a KOReader-compatible sync server for progress. That makes a self-hosted, no-paid, no-cloud-custody progress plane plausible across XTEink CrossPoint, KOReader devices, Android, iPad, macOS, and Windows.
 
+Family/multi-user support is viable only with the constraints in `docs/family-multi-user-admin-plan.md`: shared books are fine, but OPDS credentials, KOSync progress, WebDAV roots, setup pages, and upload permissions must be per-user.
+
 ## Hard Constraints
 
 - No paid service in the core path.
@@ -21,6 +23,8 @@ This changes the earlier framing. Readest is not just a separate WebDAV lane: cu
 - Runtime secrets, books, sync databases, and WebDAV state stay outside git.
 - All install/config/proxy/service changes must be represented in this repo.
 - Kobo stock reader is optional; Kobo with KOReader remains in scope.
+- Multi-user mode must never share KOSync credentials or Readest WebDAV roots between people.
+- Family upload must stage files for owner review; family users must not write directly into `/srv/books/library`.
 
 ## Target Devices
 
@@ -100,6 +104,7 @@ KOSync binary matching only works if the clients compute the same document diges
 - KOReader uses `Binary`.
 - CrossPoint uses the same sync server and should be set to binary matching once available in the device UI.
 - Do not convert, optimize, metadata-rewrite, or re-zip a book after it enters the canonical library without treating it as a new sync identity.
+- In family mode, each person uses their own KOSync account so the same canonical EPUB can be read by multiple people without progress collisions.
 
 This is the main failure mode. Filename matching is easier but too weak for editions, renamed downloads, and duplicate titles.
 
@@ -140,24 +145,35 @@ This is the main failure mode. Filename matching is easier but too weak for edit
 - Store Redis state under `/srv/books/kosync`.
 - Expose it publicly at `/kosync` without exe.dev owner-header gating.
 - Use KOSync credentials, not Calibre/exe.dev auth, for this path.
-- Bootstrap with registration enabled, create a sync-only user, then restart with registration disabled.
+- Bootstrap with registration enabled, create one sync user per human reader, then restart with registration disabled.
 - Add health/auth/progress probes to `scripts/books`.
 
 ### Phase 3: Readest
 
 - Configure Readest on Android, iPad, macOS, and Windows.
 - Add Calibre OPDS with Basic auth.
-- Configure KOReader Sync in Readest against `https://books.exe.xyz/kosync`.
+- Configure KOReader Sync in Readest against `https://books.exe.xyz/kosync` using that reader's own KOSync account.
 - Set checksum/document matching to file content.
-- Configure WebDAV at `https://books.exe.xyz/dav/readest` only after KOSync progress is verified.
+- Configure WebDAV only after KOSync progress is verified.
 - Use WebDAV for Readest state and optional book files; do not rely on it for CrossPoint/KOReader.
+- In family mode, every reader must get a separate WebDAV root.
 
 ### Phase 4: CrossPoint And KOReader
 
-- Configure CrossPoint to the same KOSync endpoint and sync-only user.
+- Configure CrossPoint to the same KOSync endpoint and that reader's own KOSync user.
 - Configure KOReader to the same endpoint and binary matching.
 - Download the same fixture EPUBs from Calibre OPDS.
 - Test push and pull in every direction that matters.
+
+### Phase 4.5: Family Accounts And Admin Panel
+
+- Add a runtime account registry outside git.
+- Add `scripts/books users create/list/disable/purge/rotate/reconcile`.
+- Make onboarding idempotently reconcile the registry into Calibre, KOSync, WebDAV, nginx maps, and setup pages.
+- Keep the admin panel owner-only through exe.dev headers.
+- Make the admin panel a thin UI over the same user CLI/helper.
+- Generate task-first setup pages for each user.
+- Keep family uploads staged outside `/srv/books/library` until owner approval.
 
 ### Phase 5: Optional Kobo/Server Sidecars
 
@@ -175,6 +191,8 @@ The architecture passes only if:
 - KOReader on at least one non-X4 device can push and pull the same fixture through KOSync with binary matching.
 - Readest on iPad, Android, macOS, and Windows can push and pull progress through KOSync using file-content matching.
 - Readest WebDAV syncs highlights/notes/progress between Readest clients without a Readest cloud account.
+- Two different users can read the same canonical EPUB without KOSync progress collisions.
+- A disabled user can no longer access OPDS, KOSync, WebDAV, setup pages, or optional upload.
 - KOSync survives service restart and VM reboot.
 - Backup/restore covers `/srv/books/library`, `/srv/books/kosync`, `/srv/books/readest-webdav`, and any sidecar databases.
 - A failed hash match is visible in probes or the test matrix before a user trusts the setup.
@@ -190,6 +208,8 @@ If CrossPoint lands only at chapter starts for normal EPUBs, the architecture is
 - `config/books.env.example` additions for ports, image tags/digests, paths, and bootstrap-only credentials
 - `scripts/onboard` KOSync bootstrap and WebDAV setup
 - `scripts/books kosync-health`, `kosync-auth`, and fixture progress probes
+- `scripts/books users ...` account lifecycle commands
+- owner-only admin panel that wraps the user CLI/helper
 - `bin/books-hash` or equivalent for raw SHA256 plus KOReader-style partial MD5 checks
 - updated backup/restore docs for KOSync Redis and Readest WebDAV state
 
@@ -226,3 +246,4 @@ Avoid:
 - BookOrbit KOReader docs: https://bookorbit.app/koreader.html
 - Komga KOReader docs: https://komga.org/docs/guides/koreader/
 - Everbound repository: https://github.com/Neighborhood-Nerd/everbound-ereader-app
+- Family multi-user admin plan: docs/family-multi-user-admin-plan.md
