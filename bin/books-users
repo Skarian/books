@@ -51,8 +51,21 @@ def slugify(value):
     return slug[:48]
 
 
+WORDS = """
+amber anchor apple autumn baker beacon bridge bright cabin cedar cherry circle
+clear coffee comet cotton creek crystal daily delta desert ember engine feather
+forest garden gentle golden harbor honest island lantern maple meadow mellow
+mirror morning native ocean orange pepper planet pocket quiet river silver
+simple steady summer sunset temple timber valley velvet window winter wonder
+""".split()
+
+
 def password():
     return base64.urlsafe_b64encode(secrets.token_bytes(18)).decode().rstrip("=")
+
+
+def passphrase():
+    return "-".join(secrets.choice(WORDS) for _ in range(4))
 
 
 def md5(value):
@@ -71,6 +84,8 @@ def db():
           email text,
           status text not null default 'active',
           roles text not null default 'reader',
+          login_user text unique,
+          login_password text,
           opds_user text not null unique,
           opds_password text not null,
           kosync_user text not null unique,
@@ -86,8 +101,28 @@ def db():
         """
     )
     columns = {row["name"] for row in conn.execute("pragma table_info(accounts)").fetchall()}
+    if "login_user" not in columns:
+        conn.execute("alter table accounts add column login_user text")
+    if "login_password" not in columns:
+        conn.execute("alter table accounts add column login_password text")
     # Legacy installs may still have readest_email/readest_password columns from
     # the self-hosted Readest experiment. They are intentionally ignored.
+    rows = conn.execute(
+        "select slug, login_user, login_password from accounts"
+    ).fetchall()
+    for row in rows:
+        updates = {}
+        if not row["login_user"]:
+            updates["login_user"] = row["slug"]
+        if not row["login_password"]:
+            updates["login_password"] = passphrase()
+        if updates:
+            updates["updated_at"] = now()
+            assignments = ", ".join(f"{key}=?" for key in updates)
+            conn.execute(
+                f"update accounts set {assignments} where slug=?",
+                [*updates.values(), row["slug"]],
+            )
     conn.execute(
         """
         create table if not exists audit_log (
@@ -153,6 +188,14 @@ def calibre_remove_user(user):
         run(["calibre-server", "--userdb", USERDB, "--manage-users", "--", "remove", user], check=False)
 
 
+def service_user(row):
+    return row["login_user"] or row["slug"]
+
+
+def service_password(row):
+    return row["login_password"] or row["opds_password"]
+
+
 def get_account(conn, slug):
     row = conn.execute("select * from accounts where slug=?", (slug,)).fetchone()
     if not row:
@@ -172,9 +215,7 @@ def cmd_create(args):
     exists = conn.execute("select 1 from accounts where slug=?", (slug,)).fetchone()
     if exists:
         raise SystemExit(f"Account already exists: {slug}")
-    opds_pw = password()
-    kosync_pw = password()
-    setup_pw = password()
+    shared_pw = passphrase()
     roles = ["reader"]
     if args.upload:
         roles.append("uploader")
@@ -183,10 +224,11 @@ def cmd_create(args):
         """
         insert into accounts(
           slug, display_name, email, status, roles,
+          login_user, login_password,
           opds_user, opds_password,
           kosync_user, kosync_password, kosync_userkey,
           setup_user, setup_password, created_at, updated_at
-        ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             slug,
@@ -194,13 +236,15 @@ def cmd_create(args):
             args.email,
             "active",
             ",".join(roles),
+            slug,
+            shared_pw,
             f"opds_{slug}",
-            opds_pw,
+            shared_pw,
             f"sync_{slug}",
-            kosync_pw,
-            md5(kosync_pw),
+            shared_pw,
+            md5(shared_pw),
             f"setup_{slug}",
-            setup_pw,
+            shared_pw,
             created,
             created,
         ),
@@ -228,15 +272,17 @@ def account_payload(row):
         "status": row["status"],
         "roles": row["roles"],
         "setup_url": f"https://{PUBLIC_HOST}/setup/{row['slug']}",
+        "login_user": service_user(row),
+        "login_password": service_password(row),
         "readest_url": "https://web.readest.com/",
         "opds_url": f"https://{PUBLIC_HOST}/catalog",
-        "opds_user": row["opds_user"],
-        "opds_password": row["opds_password"],
+        "opds_user": service_user(row),
+        "opds_password": service_password(row),
         "kosync_url": f"https://{PUBLIC_HOST}/kosync",
-        "kosync_user": row["kosync_user"],
-        "kosync_password": row["kosync_password"],
-        "setup_user": row["setup_user"],
-        "setup_password": row["setup_password"],
+        "kosync_user": service_user(row),
+        "kosync_password": service_password(row),
+        "setup_user": service_user(row),
+        "setup_password": service_password(row),
     }
 
 
@@ -249,19 +295,17 @@ def cmd_show(args):
     else:
         print(f"{payload['display_name']} ({payload['slug']}) [{payload['status']}]")
         print(f"Setup: {payload['setup_url']}")
-        print(f"Setup login: {payload['setup_user']}")
-        print(f"Setup password: {payload['setup_password']}")
+        print()
+        print("Use this login for setup, the book catalog, and reading sync:")
+        print(f"Username: {payload['login_user']}")
+        print(f"Password: {payload['login_password']}")
         print()
         print(f"Readest: {payload['readest_url']}")
         print("Readest account: create or sign in with your own Readest account.")
         print()
         print(f"OPDS URL: {payload['opds_url']}")
-        print(f"OPDS username: {payload['opds_user']}")
-        print(f"OPDS password: {payload['opds_password']}")
         print()
         print(f"KOSync URL: {payload['kosync_url']}")
-        print(f"KOSync username: {payload['kosync_user']}")
-        print(f"KOSync password: {payload['kosync_password']}")
 
 
 def cmd_disable(args):
@@ -281,14 +325,13 @@ def cmd_rotate(args):
     row = get_account(conn, args.user)
     service = args.service
     updates = {"updated_at": now()}
-    if service in ("opds", "all"):
-        updates["opds_password"] = password()
-    if service in ("kosync", "all"):
-        kosync_pw = password()
-        updates["kosync_password"] = kosync_pw
-        updates["kosync_userkey"] = md5(kosync_pw)
-    if service in ("setup", "all"):
-        updates["setup_password"] = password()
+    if service in ("login", "all"):
+        shared_pw = passphrase()
+        updates["login_password"] = shared_pw
+        updates["opds_password"] = shared_pw
+        updates["kosync_password"] = shared_pw
+        updates["kosync_userkey"] = md5(shared_pw)
+        updates["setup_password"] = shared_pw
     assignments = ", ".join(f"{key}=?" for key in updates)
     conn.execute(
         f"update accounts set {assignments} where slug=?",
@@ -306,7 +349,9 @@ def cmd_purge(args):
     conn = db()
     row = get_account(conn, args.user)
     kosync_purge_user(row["kosync_user"])
+    kosync_purge_user(service_user(row))
     calibre_remove_user(row["opds_user"])
+    calibre_remove_user(service_user(row))
     audit(conn, "purge", row["slug"])
     conn.execute("delete from accounts where slug=?", (row["slug"],))
     conn.commit()
@@ -328,12 +373,21 @@ def cmd_reconcile(args):
     else:
         rows = conn.execute("select * from accounts order by slug").fetchall()
     for row in rows:
+        username = service_user(row)
+        shared_pw = service_password(row)
         if row["status"] == "active":
-            calibre_set_user(row["opds_user"], row["opds_password"], True)
-            kosync_set_user(row["kosync_user"], row["kosync_userkey"])
+            calibre_set_user(username, shared_pw, True)
+            if row["opds_user"] != username:
+                calibre_remove_user(row["opds_user"])
+            kosync_set_user(username, md5(shared_pw))
+            if row["kosync_user"] != username:
+                kosync_disable_user(row["kosync_user"])
             print(f"reconciled active user {row['slug']}")
         else:
-            calibre_set_user(row["opds_user"], password(), False)
+            calibre_set_user(username, password(), False)
+            if row["opds_user"] != username:
+                calibre_set_user(row["opds_user"], password(), False)
+            kosync_disable_user(username)
             kosync_disable_user(row["kosync_user"])
             print(f"disabled service access for {row['slug']}")
     try:
@@ -436,7 +490,7 @@ def main():
     disable.set_defaults(func=cmd_disable)
     rotate = sub.add_parser("rotate")
     rotate.add_argument("user")
-    rotate.add_argument("service", choices=["opds", "kosync", "setup", "all"])
+    rotate.add_argument("service", choices=["login", "all"])
     rotate.set_defaults(func=cmd_rotate)
     purge = sub.add_parser("purge")
     purge.add_argument("user")

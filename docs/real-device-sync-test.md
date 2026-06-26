@@ -86,7 +86,7 @@ If a test fails, do not add WebDAV first. Check these before changing the
 architecture:
 
 - Both devices downloaded `Books Sync Fixture` from `https://books.exe.xyz/catalog`.
-- Both devices used the same reader's KOSync username and password.
+- Both devices used the same reader's Books username and password.
 - Readest shows KOReader Sync as connected.
 - Readest shows Checksum Method as File Content.
 - KOReader uses binary matching if it exposes that setting.

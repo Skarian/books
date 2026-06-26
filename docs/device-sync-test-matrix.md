@@ -98,22 +98,22 @@ Pass only if downloaded EPUB bytes match the canonical fixture. If a client rewr
 
 | Client | Server URL | Username | Matching setting | Expected |
 |---|---|---|---|---|
-| CrossPoint | `https://books.exe.xyz/kosync` | per-reader user | Binary/file content if available | Auth works |
-| KOReader | `https://books.exe.xyz/kosync` | per-reader user | Binary | Auth works |
-| Readest | `https://books.exe.xyz/kosync` | per-reader user | File Content | Auth works |
-| Readest Web | `https://books.exe.xyz/kosync` | per-reader user | File Content | Auth works through Readest's hosted web path |
+| CrossPoint | `https://books.exe.xyz/kosync` | Books login | Binary/file content if available | Auth works |
+| KOReader | `https://books.exe.xyz/kosync` | Books login | Binary | Auth works |
+| Readest | `https://books.exe.xyz/kosync` | Books login | File Content | Auth works |
+| Readest Web | `https://books.exe.xyz/kosync` | Books login | File Content | Auth works through Readest's hosted web path |
 
 ## KOSync Account Lifecycle
 
-The helper stores the KOSync userkey in the server data store and shows the raw
-password to people. Clients such as Readest hash the typed password before
+The helper stores the KOSync userkey in the server data store and shows one
+Books login to people. Clients such as Readest hash the typed password before
 calling KOSync.
 
 | Test | Expected | Pass | Notes |
 |---|---|---|---|
-| Create KOSync user | Userkey is written for the generated raw password |  |  |
+| Create KOSync user | Userkey is written for the generated Books password |  |  |
 | Readest auth | Raw password entered in Readest authenticates |  |  |
-| Rotate KOSync password | New raw password works; old raw password fails |  |  |
+| Rotate Books password | New raw password works; old raw password fails |  |  |
 | Disable KOSync user | Auth fails but progress keys are preserved for restore |  |  |
 | Purge KOSync user | Auth and per-user progress keys are removed after confirmation |  |  |
 
@@ -124,9 +124,9 @@ Readest passes only if a normal user can configure these without owner access.
 | Integration | In-app form | Per-user credential | Required setting | Pass | Notes |
 |---|---|---|---|---|---|
 | Readest login | Sign in | User's own Readest account | User can reach `https://web.readest.com/` and sign in |  |  |
-| OPDS Catalogs | OPDS Catalogs | OPDS user/pass | Calibre catalog opens and downloads EPUB from `/catalog` |  |  |
-| KOReader Sync | KOReader Sync | KOSync user/pass | Strategy chosen for progress lane; checksum File Content |  |  |
-| Readest Web progress | KOReader Sync | KOSync user/pass | Browser app can push and pull progress through hosted Readest against `/kosync` |  |  |
+| OPDS Catalogs | OPDS Catalogs | Books login | Calibre catalog opens and downloads EPUB from `/catalog` |  |  |
+| KOReader Sync | KOReader Sync | Books login | Strategy chosen for progress lane; checksum File Content |  |  |
+| Readest Web progress | KOReader Sync | Books login | Browser app can push and pull progress through hosted Readest against `/kosync` |  |  |
 
 ## Family Account Lifecycle
 
@@ -134,9 +134,9 @@ Use this section before enabling family access. It validates `docs/research/fami
 
 | Test | Expected | Pass | Notes |
 |---|---|---|---|
-| Create user | OPDS and KOSync credentials are created for only that user |  |  |
+| Create user | One Books login is created for only that user |  |  |
 | Reconcile users | Derived Calibre/KOSync/setup state is rebuilt without rotating passwords |  |  |
-| Rotate one user's KOSync password | New password works, old password fails, other users unaffected |  |  |
+| Rotate one user's Books login | New password works, old password fails, other users unaffected |  |  |
 | Disable user | OPDS, KOSync, setup page, and upload access fail for that user |  |  |
 | Purge user | User state is removed or archived without touching shared Calibre books |  |  |
 | Setup page privacy | User sees only their own credentials; owner/admin credentials never appear |  |  |

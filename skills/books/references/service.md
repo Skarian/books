@@ -86,8 +86,7 @@ Use the repo helper:
 ./scripts/books users list
 ./scripts/books users create "Name" --email person@example.com
 ./scripts/books users show USER
-./scripts/books users rotate USER setup
-./scripts/books users rotate USER kosync
+./scripts/books users rotate USER login
 ./scripts/books users rotate USER all
 ./scripts/books users disable USER
 ./scripts/books users purge USER --yes
@@ -95,8 +94,9 @@ Use the repo helper:
 ```
 
 The helper reconciles active users into Calibre OPDS users and KOSync Redis
-keys. The setup page shows each user's OPDS and KOSync values. Readest accounts
-are managed by Readest; this VM only provides the catalog and progress endpoint.
+keys using one Books login per reader. The setup page shows that login once.
+Readest accounts are managed by Readest; this VM only provides the catalog and
+progress endpoint.
 Do not add WebDAV unless the device matrix proves OPDS plus KOSync is not enough.
 
 Run `./scripts/books verify USER` after onboarding, account changes, or service

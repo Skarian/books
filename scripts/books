@@ -40,8 +40,25 @@ case "${COMMAND}" in
     ;;
   health)
     source /etc/books/books.env
+    user="$(BOOKS_ACCOUNTS_DB="${BOOKS_ACCOUNTS_DB}" python3 - <<'PY'
+import os
+import sqlite3
+
+conn = sqlite3.connect(os.environ["BOOKS_ACCOUNTS_DB"])
+row = conn.execute("select slug from accounts where status='active' order by slug limit 1").fetchone()
+print(row[0] if row else "")
+PY
+)"
+    if [[ -n "${user}" ]]; then
+      payload="$(/opt/books/bin/books-users show "${user}" --json)"
+      books_user="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["login_user"])' <<<"${payload}")"
+      books_password="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["login_password"])' <<<"${payload}")"
+    else
+      books_user="${CALIBRE_OPDS_USER}"
+      books_password="${CALIBRE_OPDS_PASSWORD}"
+    fi
     curl -fsS "http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz"
-    curl -fsSI -u "${CALIBRE_OPDS_USER}:${CALIBRE_OPDS_PASSWORD}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/opds" | sed -n '1,12p'
+    curl -fsSI -u "${books_user}:${books_password}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/opds" | sed -n '1,12p'
     curl -fsS -H "Accept: application/vnd.koreader.v1+json" "http://127.0.0.1:${BOOKS_PROXY_PORT}/kosync/healthcheck"
     curl -fsS -H "X-ExeDev-Email: ${BOOKS_ALLOWED_EMAIL}" "http://127.0.0.1:${BOOKS_PROXY_PORT}/" >/dev/null
     ;;

@@ -90,7 +90,7 @@ separate account per reader.
 
 Official KOSync is last-write-wins. A later update can move progress backward.
 That is acceptable for one human moving between devices, but it is why each
-person needs a separate KOSync account.
+person needs a separate Books login.
 
 Readest gets books through OPDS and syncs position through KOReader Sync. That is
 the default path. The web reader lives at `https://web.readest.com/`, and
