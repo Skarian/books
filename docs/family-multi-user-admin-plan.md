@@ -2,6 +2,9 @@
 
 Research date: June 26, 2026 UTC.
 
+This is the planning record behind the family-user docs. For the shorter working
+version, read `docs/family-users.md`.
+
 ## Verdict
 
 Family mode is viable, but the naive version is unsafe.

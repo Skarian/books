@@ -1,6 +1,8 @@
-# Books Service
+# Books service
 
-Reproducible setup for a personal Calibre EPUB/OPDS service on `books.exe.xyz`.
+Reproducible setup for Neil's self-hosted reading system on `books.exe.xyz`.
+The repo will stand up the shared Calibre bookshelf, cross-device progress sync,
+Readest WebDAV state, family users, and an owner-only admin panel.
 
 The repo is the source of truth. Runtime data and secrets live outside git:
 
@@ -10,8 +12,11 @@ The repo is the source of truth. Runtime data and secrets live outside git:
 - `/srv/books/import`: temporary conversion/import files, not committed
 - `/srv/books/log`: service logs, not committed
 - `/srv/books/calibre-web`: Calibre-Web settings DB, not committed
+- `/srv/books/kosync`: KOSync state, not committed
+- `/srv/books/readest-webdav`: Readest WebDAV state, not committed
+- `/srv/books/inbox`: staged family uploads, not committed
 
-## Architecture
+## Current implementation
 
 - `nginx` listens on `BOOKS_PROXY_PORT` (`8000` by default) for the exe.dev HTTPS proxy.
 - `calibre-server` listens only on `127.0.0.1:8080`.
@@ -22,6 +27,18 @@ The repo is the source of truth. Runtime data and secrets live outside git:
 - Calibre-Web Kobo routes are blocked at nginx because Crosspoint uses native Calibre OPDS and Kobo sync is not needed.
 
 This follows the documented exe.dev proxy behavior: the proxy forwards standard `X-Forwarded-*` headers and, for authenticated users, adds `X-ExeDev-Email`. Public/private access is controlled with documented `ssh exe.dev share ...` commands.
+
+## Docs to read first
+
+- `docs/architecture.md`: the repo contract and service shape
+- `docs/device-setup.md`: how CrossPoint, Readest, KOReader, and Kobo connect
+- `docs/family-users.md`: family accounts, setup pages, uploads, and the owner admin panel
+- `docs/device-sync-test-matrix.md`: the checklist before trusting progress sync
+
+These are background research notes:
+
+- `docs/self-hosted-reading-sync-research.md`
+- `docs/family-multi-user-admin-plan.md`
 
 ## Onboard A Fresh VM
 

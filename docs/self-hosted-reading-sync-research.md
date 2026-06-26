@@ -2,6 +2,9 @@
 
 Research date: June 26, 2026 UTC.
 
+This is background research. For the working service docs, start with
+`docs/architecture.md`, `docs/device-setup.md`, and `docs/family-users.md`.
+
 ## Decision
 
 The recommended architecture is viable enough to implement and test:
