@@ -7,8 +7,8 @@ official apps and `https://web.readest.com/`.
 Do not copy random EPUB files between devices if progress matters. Use the OPDS
 download so every app starts from the same canonical file.
 
-KOSync is the progress authority. Do not configure Readest WebDAV for the core
-pilot. It is a fallback only if OPDS plus KOSync fails a real device test.
+KOSync is the progress authority. Do not configure Readest WebDAV for this
+setup. It is a separate sync lane and this repo does not run it.
 
 ## Credentials
 
@@ -59,10 +59,7 @@ Use Readest on the general-purpose devices.
 11. Use `https://books.exe.xyz/kosync`.
 12. Sign in with the same Books username and password.
 13. After it connects, leave Checksum Method set to File Content.
-14. Open Account or Advanced Settings, then Manage Sync.
-15. Keep App settings and OPDS catalogs enabled.
-16. Turn on Credentials, set a sync passphrase, and use that same passphrase on
-    other Readest devices.
+14. Repeat these steps on each Readest device.
 
 Do not enter `/api`, `/v1`, or `/healthcheck` after the KOSync URL. The URL is
 exactly `https://books.exe.xyz/kosync`.
@@ -72,13 +69,12 @@ Integrations. Each person enters the same Books username and password in the
 KOReader Sync form. That is user-accessible inside the app; it does not require
 an admin dashboard.
 
-Readest account sync should copy the catalog and KOSync settings to other
-signed-in Readest devices. The passwords only follow if Credentials sync is on.
-If a second device shows the catalog but asks for a password, enter the same
-Readest sync passphrase or re-enter the Books login from the setup page.
+Readest's own account sync is convenient when it works, but this repo does not
+depend on it. If a second device does not show the catalog or KOSync settings,
+enter the same Books login from the setup page.
 
-Do not turn on Readest WebDAV during the first pilot. It is not needed for book
-downloads or progress sync, and it can introduce a second progress path.
+Do not turn on Readest WebDAV. It is not needed for book downloads or progress
+sync, and it can introduce a second progress path.
 
 After setup, test with `Books Sync Fixture`. Neil can add it with:
 

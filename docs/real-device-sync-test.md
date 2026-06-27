@@ -82,8 +82,7 @@ Readest iPad -> CrossPoint: limited pass, landed at chapter start.
 CrossPoint -> Readest Android: fail, opened at beginning.
 ```
 
-If a test fails, do not add WebDAV first. Check these before changing the
-architecture:
+If a test fails, check these before changing the architecture:
 
 - Both devices downloaded `Books Sync Fixture` from `https://books.exe.xyz/catalog`.
 - Both devices used the same reader's Books username and password.

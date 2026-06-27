@@ -1,136 +1,101 @@
-# Books repo contract
+# Architecture
 
-Books is the repo for Neil's self-hosted reading system on `books.exe.xyz`.
+Books is a small service bundle for `books.exe.xyz`.
 
-Its job is to make the VM disposable. Clone the repo, restore the runtime data,
-run onboarding, and the service comes back with the same routes, users, and
-reader behavior.
+The design is intentionally plain:
 
-## Service shape
+- Calibre owns book files, metadata, OPDS, and downloads.
+- KOSync owns reading position.
+- Hosted Readest owns the reader UI and Readest accounts.
+- The Node app owns setup pages and the owner CLI.
+- Hardcover Want to Read is the automatic intake list.
 
-The repo stands up this public shape:
+No local web reader, dashboard, or Calibre-Web instance is part of the default
+build.
+
+## Routes
 
 ```text
 https://books.exe.xyz
-  /catalog          -> shared Calibre bookshelf for setup and apps
-  /opds             -> shared Calibre bookshelf
-  /get/...          -> canonical EPUB downloads
-  /kosync           -> progress sync
-  /library          -> redirect to official Readest Web
-  /setup/<user>     -> per-user setup and book requests
-  /calibre/         -> owner Calibre-Web
-  /                 -> owner portal
+  /catalog       -> Calibre OPDS, rewritten to /opds
+  /opds          -> Calibre OPDS
+  /get/...       -> Calibre downloads
+  /kosync        -> KOReader Sync Server, prefix stripped by nginx
+  /setup/<user>  -> Node setup page for that user
+  /library       -> redirect to https://web.readest.com/
+  /healthz       -> local service health
+  /              -> 404
 ```
 
-The split matters:
+Reader routes must work without an exe.dev browser session. OPDS uses Calibre
+Basic auth. KOSync uses KOSync auth. Setup pages use the same Books login as the
+reader apps.
 
-- Calibre owns the books.
-- Readest owns the browser/app reading session on its own hosted service and apps.
-- KOSync owns reading position.
-- The account helper owns the family workflow, not the library data itself.
+Do not configure clients with `/api`, `/v1`, or `/healthcheck` appended to the
+KOSync URL. The client base URL is exactly:
 
-No service should take over another service's job. That keeps restore and
-debugging sane.
+```text
+https://books.exe.xyz/kosync
+```
 
-## Route rules
+Nginx strips `/kosync` before proxying. For example,
+`/kosync/users/auth` reaches upstream `/users/auth`.
 
-Reader apps need routes they can reach without an exe.dev browser session:
+## Accounts
 
-- `/opds`
+`/srv/books/config/accounts.sqlite` is the source of truth for readers. Each
+active reader has one public login:
+
+```text
+username: neil
+password: river-window-beacon-maple
+```
+
+That login works for:
+
+- `/setup/<user>`
 - `/catalog`
-- `/get/...`
 - `/kosync`
 
-Those routes authenticate with service credentials. OPDS uses Calibre Basic auth.
-KOSync uses KOSync credentials.
+The same SQLite database also stores Hardcover tokens and fulfillment history.
+Secrets stay out of git.
 
-Use `/catalog` in setup docs and user pages. `/opds` remains available for apps
-that expect that exact path.
+`./scripts/books users reconcile` pushes account state into Calibre and KOSync.
+It does not rotate passwords. Rotation happens only through
+`./scripts/books users rotate USER all`.
 
-The public KOSync URL for clients is `https://books.exe.xyz/kosync`. Reader apps
-append KOSync API paths such as `/users/auth` and `/syncs/progress`, so nginx
-must strip the `/kosync` prefix before proxying to the KOSync upstream. For
-example, `/kosync/users/auth` must reach upstream `/users/auth`, and
-`/kosync/healthcheck` must reach upstream `/healthcheck`.
+## Progress
 
-Do not configure clients with `/api`, `/v1`, or `/healthcheck` appended. The
-client base URL is exactly `https://books.exe.xyz/kosync`.
+KOSync is the progress authority. Readest, KOReader, and CrossPoint should all
+use KOSync when the app supports it.
 
-Owner routes stay behind exe.dev login for `neil.skaria@gmail.com`:
+KOSync is progress-only. It does not sync highlights, notes, bookmarks, ratings,
+collections, or the book files themselves. The book file comes from OPDS.
 
-- `/`
-- `/calibre/`
-- any page that can list users or reveal setup links
-- any future `/admin` route
+Progress identity depends on the reader app's KOReader-compatible file content
+hash. The practical rule is simple: download the same EPUB from `/catalog` on
+each device.
 
-Per-user setup pages get their own access control and no-store caching. They can
-show that user's credentials, but never owner credentials or another user's
-credentials.
+KOSync is last-write-wins. One stale device can move progress backward, so family
+members must not share a Books login.
 
-## Service ownership
+## Hardcover Intake
 
-| Service | Owns | Does not own |
-|---|---|---|
-| Calibre | EPUB files, metadata, OPDS catalog, downloads | progress, highlights, family admin |
-| Calibre-Web | owner browser reader and owner library UI | public family admin, cross-device progress |
-| Official Readest | browser/app reader account, app library state | progress authority, canonical book files, VM operations |
-| KOSync | per-user reading position for canonical EPUBs | book files, notes, highlights |
-| Account helper | OPDS credentials, KOSync credentials, setup pages, service reconciliation | Readest accounts, direct service state outside the shared helper |
+For a configured user, the timer runs every five minutes:
 
-`scripts/books users ...` is the primary owner interface. Codex can use it
-through the `books` skill when Neil wants to add, disable, rotate, or inspect a
-reader account by chatting. A future admin panel is optional UI over the same
-helper and does not get a private data path.
+1. Read that user's Hardcover Want to Read list.
+2. Search Anna's Archive for an English EPUB.
+3. Download and import the match into Calibre.
+4. Move the Hardcover item to Currently Reading.
+5. Record the result in SQLite.
 
-## Progress authority
+The Anna download cap is global for the VM. It is not per user.
 
-KOSync is the only cross-app progress authority. CrossPoint, KOReader, and
-Readest should all push and pull reading position through `/kosync` with a
-separate account per reader.
+## Runtime State
 
-Official KOSync is last-write-wins. A later update can move progress backward.
-That is acceptable for one human moving between devices, but it is why each
-person needs a separate Books login.
+Git contains scripts, schemas, templates, systemd units, nginx config, and docs.
 
-Readest gets books through OPDS and syncs position through KOReader Sync. That is
-the default path. The web reader lives at `https://web.readest.com/`, and
-`/library` only redirects old local links there. Readest's hosted web app uses
-its own server-side KOSync proxy for public sync servers, so this VM only needs
-to expose `https://books.exe.xyz/kosync` correctly.
-
-Readest account sync can copy the OPDS catalog, KOSync settings, and optionally
-credentials across signed-in Readest devices. Credentials require Readest's
-Credentials sync and a user-chosen sync passphrase. The VM does not create or
-rotate Readest accounts.
-
-Current upstream Readest exposes these integrations separately:
-
-- OPDS Catalogs: catalog URL, optional username, optional password, optional
-  custom headers, browse/download action, and optional auto-download.
-- KOReader Sync: server URL, username, password, enable switch, strategy, file
-  content checksum, device name.
-
-Do not add WebDAV to the default build. Readest's WebDAV support is a separate
-sync channel that can move per-book config, including progress and location.
-That makes it a second writer next to KOSync. If OPDS plus KOSync fails a real
-device test, or if Readest-only notes/backups become a hard requirement, WebDAV
-can be introduced later behind a new test matrix section.
-
-The honest limitation: official KOSync is progress-only. It does not sync
-Readest highlights, notes, bookmarks, collections, ratings, or book files. That
-is acceptable for the core repo because the requirement that matters most is
-continuing from the same place across devices.
-
-Document identity is partial-MD5/file-content identity, not full-file MD5.
-KOReader calls this binary matching. Readest labels it `File Content` and stores
-the same style of partial MD5 as `book.hash`.
-
-## Runtime state
-
-The repo contains installs, scripts, templates, schemas, migrations, systemd
-units, nginx config, and docs.
-
-Runtime state stays outside git:
+Runtime state lives here:
 
 - `/etc/books/books.env`
 - `/srv/books/library`
@@ -138,16 +103,9 @@ Runtime state stays outside git:
 - `/srv/books/import`
 - `/srv/books/log`
 - `/srv/books/config`
-- `/srv/books/calibre-web`
 - `/srv/books/kosync`
-- `/srv/books/inbox`
 
-Backups need the runtime paths. Git recreates the service, not the books or
-personal state.
-
-## Restore contract
-
-A fresh VM restore works like this:
+Restore flow:
 
 1. Clone the repo.
 2. Restore `/etc/books/books.env`.
@@ -155,31 +113,19 @@ A fresh VM restore works like this:
 4. Run `./scripts/onboard`.
 5. Run `./scripts/books users reconcile`.
 6. Run `./scripts/books health`.
-7. Run the device sync matrix before trusting cross-device progress.
+7. Run `./scripts/books verify USER`.
 
-No required restore step should live only in shell history, Calibre-Web clicks, or
-manual edits under `/etc`.
+No required restore step should live only in shell history or a manual edit under
+`/etc`.
 
-## Status
+## Services
 
-Implemented now:
+- `books-calibre.service`
+- `books-kosync.service`
+- `books-node.service`
+- `books-hardcover-sync.service`
+- `books-hardcover-sync.timer`
+- `nginx`
 
-- Calibre
-- Calibre-Web
-- owner portal
-- nginx
-- Anna's Archive MCP/CLI
-- OPDS and `/get/...`
-- KOSync
-- family account registry
-- `scripts/books users ...`
-- setup pages
-- book request queue
-- owner-only Calibre-Web
-- import helpers
-- onboarding
-
-Not wired yet:
-
-- optional owner admin panel
-- family upload staging UI
+The old `books-calibre-web.service` and `books-portal.service` are retired by
+onboarding.

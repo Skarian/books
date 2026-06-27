@@ -3,38 +3,44 @@
 ## Layout
 
 - Repo: `/home/exedev/books`
-- Secrets/env: `/etc/books/books.env`
+- Env/secrets: `/etc/books/books.env`
 - Calibre library: `/srv/books/library`
-- Staged downloads: `/srv/books/downloads`
-- Import/conversion staging: `/srv/books/import`
-- Service logs: `/srv/books/log`
-- Family accounts: `/srv/books/config/accounts.sqlite`
-- Book request queue: `/srv/books/requests`
-- Calibre service: `books-calibre`
-- Calibre-Web service: `books-calibre-web`
-- Portal service: `books-portal`
-- KOSync service: `books-kosync`
-- Hardcover request sync timer: `books-hardcover-sync.timer`
+- Downloads: `/srv/books/downloads`
+- Import staging: `/srv/books/import`
+- Logs: `/srv/books/log`
+- Accounts: `/srv/books/config/accounts.sqlite`
+- Calibre users: `/srv/books/config/users.sqlite`
+- KOSync state: `/srv/books/kosync`
 - Public host: `books.exe.xyz`
+
+Services:
+
+- `books-calibre`
+- `books-kosync`
+- `books-node`
+- `books-hardcover-sync.timer`
+- `nginx`
 
 ## Routing
 
-Nginx listens on `BOOKS_PROXY_PORT`, proxies native Calibre on
-`127.0.0.1:${CALIBRE_PORT}`, Calibre-Web on
-`127.0.0.1:${CALIBRE_WEB_PORT}`, the portal on
-`127.0.0.1:${BOOKS_PORTAL_PORT}`, and KOSync on
-`127.0.0.1:${KOSYNC_PORT}`.
+Nginx listens on `BOOKS_PROXY_PORT`.
 
-- `/library` redirects older local Readest links to `https://web.readest.com/`.
-- `/catalog`, `/opds`, and `/get/...` are open at nginx and protected by Calibre Basic auth for CrossPoint and reader apps. Prefer `/catalog` in user-facing setup.
-- `/kosync` is open at nginx and protected by KOSync credentials. Nginx strips the `/kosync` prefix before proxying to the KOSync container.
-- `/setup/<user>` is open at nginx and protected by per-user setup Basic auth in the portal.
-- `/` and owner portal routes require `X-ExeDev-Email` to match `BOOKS_ALLOWED_EMAIL`.
-- `/calibre/` requires `X-ExeDev-Email` to match `BOOKS_ALLOWED_EMAIL`, then Calibre-Web auth.
-- Calibre-Web Kobo routes are blocked at nginx unless intentionally enabled later.
-- If the exe.dev proxy is public, unauthenticated browser UI requests redirect to `/__exe.dev/login`.
+- `/catalog`, `/opds`, and `/get/...` go to Calibre.
+- `/kosync` goes to KOSync with the prefix stripped.
+- `/setup/<user>` goes to the Node app and uses that user's Books login.
+- `/library` redirects to `https://web.readest.com/`.
+- `/healthz` goes to the Node app.
+- `/` returns 404.
 
-Do not add undocumented exe.dev endpoints. Use only documented commands such as:
+The VM cannot call its own public `books.exe.xyz` endpoint. Use local nginx for
+checks:
+
+```bash
+./scripts/books health
+./scripts/books verify USER
+```
+
+Use only documented exe.dev commands:
 
 ```bash
 ssh exe.dev share port books 8000
@@ -42,90 +48,78 @@ ssh exe.dev share set-public books
 ssh exe.dev share set-private books
 ```
 
-## Import
+## Users
 
-Prefer EPUB and English editions. Import with:
-
-```bash
-./scripts/books import /path/to/book.epub
-```
-
-For non-EPUB files, use conversion only when the user accepts possible quality loss:
-
-```bash
-./scripts/books import --convert /path/to/book.pdf
-```
-
-Generate the local real-device sync fixture with:
-
-```bash
-./scripts/books sync-fixture
-```
-
-That writes `/srv/books/downloads/books-sync-fixture.epub` and imports
-`Books Sync Fixture` into Calibre. Use it before filling in
-`docs/device-sync-test-matrix.md`.
-
-## Anna's Archive MCP/CLI
-
-The installed binary is `/opt/books/bin/annas-mcp`, wrapped by `/opt/books/bin/books-annas` and exposed as:
-
-```bash
-./scripts/books anna book-search "query"
-./scripts/books anna book-download MD5_HASH filename.epub
-```
-
-The wrapper sources `/etc/books/books.env` and runs the binary with `ANNAS_SECRET_KEY`, `ANNAS_DOWNLOAD_PATH`, and `ANNAS_BASE_URL`.
-
-Respect copyright and terms. If a requested title is not clearly public domain, Creative Commons, owned, or otherwise authorized, ask for confirmation before download.
-
-## Hardcover Requests
-
-Hardcover Want to Read is the automatic intake queue. Configure it per user:
-
-```bash
-printf '%s\n' 'Bearer ...' | ./scripts/books hardcover set-token USER
-./scripts/books hardcover status
-./scripts/books hardcover sync --dry-run --user USER --limit 1
-./scripts/books hardcover sync --user USER
-```
-
-The token is stored in `/srv/books/config/accounts.sqlite`, outside git. The
-sync loop runs every five minutes through `books-hardcover-sync.timer`, searches
-Anna's Archive for English EPUBs, imports fulfilled books into Calibre, and moves
-fulfilled Hardcover items from Want to Read to Currently Reading. The Anna cap is
-global across all users and defaults to 15 downloads per UTC day.
-
-## Family Users
-
-Use the repo helper:
+Each reader gets one Books login. It works for setup, OPDS, and KOSync.
 
 ```bash
 ./scripts/books users list
 ./scripts/books users create "Name" --email person@example.com
 ./scripts/books users show USER
-./scripts/books users rotate USER login
 ./scripts/books users rotate USER all
 ./scripts/books users disable USER
 ./scripts/books users purge USER --yes
 ./scripts/books users reconcile
 ```
 
-The helper reconciles active users into Calibre OPDS users and KOSync Redis
-keys using one Books login per reader. The setup page shows that login once.
-Readest accounts are managed by Readest; this VM only provides the catalog and
-progress endpoint.
-Do not add WebDAV unless the device matrix proves OPDS plus KOSync is not enough.
+Run `users reconcile` after onboarding or account changes if Calibre/KOSync state
+looks stale.
 
-Run `./scripts/books verify USER` after onboarding, account changes, or service
-changes. It checks local nginx routes, owner gating, setup Basic auth, OPDS auth,
-KOSync health/auth, systemd services, and the pinned KOSync image. It uses local
-nginx because the VM cannot call its own public `books.exe.xyz` endpoint.
+## Reader Setup
 
-Book requests submitted from setup pages are stored as JSON under
-`/srv/books/requests/<user>/`. Review them with:
+Tell readers to use hosted Readest:
+
+```text
+https://web.readest.com/
+```
+
+Then configure:
+
+```text
+OPDS catalog: https://books.exe.xyz/catalog
+KOSync server: https://books.exe.xyz/kosync
+```
+
+Use the same Books username and password for both.
+
+## Imports
+
+Prefer English EPUBs.
 
 ```bash
-./scripts/books requests list
-./scripts/books requests process PATH
+./scripts/books import /path/to/book.epub
+./scripts/books import --convert /path/to/book.pdf
+./scripts/books sync-fixture
 ```
+
+The sync fixture writes `/srv/books/downloads/books-sync-fixture.epub` and
+imports `Books Sync Fixture` into Calibre.
+
+## Anna's Archive MCP
+
+The installed binary is `/opt/books/bin/annas-mcp`.
+
+Use it through the repo helper so env vars come from `/etc/books/books.env`:
+
+```bash
+./scripts/books anna book-search "query"
+./scripts/books anna book-download MD5_HASH filename.epub
+```
+
+Respect copyright and terms. Ask before downloading when authorization is not
+clear.
+
+## Hardcover Intake
+
+Configure a token per user:
+
+```bash
+printf '%s\n' 'Bearer ...' | ./scripts/books hardcover set-token USER
+./scripts/books hardcover status USER
+./scripts/books hardcover sync --dry-run --user USER --limit 1
+./scripts/books hardcover sync --user USER
+```
+
+The timer checks Want to Read every five minutes, imports fulfilled EPUBs into
+Calibre, and moves fulfilled Hardcover items to Currently Reading. The Anna cap
+is global for the VM.

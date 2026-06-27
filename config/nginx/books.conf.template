@@ -8,28 +8,13 @@ map $http_x_forwarded_host $books_forwarded_host {
     "" $host;
 }
 
-map $http_x_exedev_email $books_has_exedev_user {
-    default 1;
-    "" 0;
-}
-
-map $http_x_exedev_email $books_exedev_owner {
-    default 0;
-    "__BOOKS_ALLOWED_EMAIL__" 1;
-}
-
 upstream books_calibre {
     server 127.0.0.1:__CALIBRE_PORT__;
     keepalive 16;
 }
 
-upstream books_calibre_web {
-    server 127.0.0.1:__CALIBRE_WEB_PORT__;
-    keepalive 16;
-}
-
-upstream books_portal {
-    server 127.0.0.1:__BOOKS_PORTAL_PORT__;
+upstream books_node {
+    server 127.0.0.1:__BOOKS_NODE_PORT__;
     keepalive 16;
 }
 
@@ -55,10 +40,9 @@ server {
     location = /healthz {
         access_log off;
         add_header Content-Type text/plain;
-        proxy_pass http://books_portal;
+        proxy_pass http://books_node;
     }
 
-    # Human-friendly OPDS catalog URL for setup pages.
     location = /catalog {
         rewrite ^ /opds break;
         proxy_pass http://books_calibre;
@@ -69,17 +53,14 @@ server {
         proxy_pass http://books_calibre;
     }
 
-    # CrossPoint, Readest, and KOReader authenticate directly to Calibre with Basic auth.
     location ^~ /opds {
         proxy_pass http://books_calibre;
     }
 
-    # Calibre OPDS acquisition, cover, and thumbnail links use /get/...
     location ^~ /get/ {
         proxy_pass http://books_calibre;
     }
 
-    # KOSync clients use /kosync as the base URL and append root-relative API paths.
     location = /kosync {
         return 308 /kosync/;
     }
@@ -95,45 +76,15 @@ server {
         proxy_pass http://books_calibre;
     }
 
-    # Keep unused calibre-web Kobo sync endpoints dark unless intentionally enabled later.
-    location ^~ /kobo {
-        return 404;
-    }
-
-    location = /calibre {
-        return 308 /calibre/;
-    }
-
-    # Owner Calibre-Web UI.
-    location ^~ /calibre/ {
-        if ($books_has_exedev_user = 0) {
-            return 302 https://$http_host/__exe.dev/login?redirect=$request_uri;
-        }
-        if ($books_exedev_owner = 0) {
-            return 403;
-        }
-        proxy_set_header X-Script-Name /calibre;
-        proxy_pass http://books_calibre_web/;
-    }
-
-    # Per-user setup pages use their own Basic auth, not exe.dev owner auth.
     location ^~ /setup/ {
-        proxy_pass http://books_portal;
+        proxy_pass http://books_node;
     }
 
-    # Compatibility for older setup links from the self-hosted Readest pilot.
-    location ^~ /library {
+    location ~ ^/library/?$ {
         return 302 https://web.readest.com/;
     }
 
-    # Owner portal routes.
     location / {
-        if ($books_has_exedev_user = 0) {
-            return 302 https://$http_host/__exe.dev/login?redirect=$request_uri;
-        }
-        if ($books_exedev_owner = 0) {
-            return 403;
-        }
-        proxy_pass http://books_portal;
+        return 404;
     }
 }

@@ -7,9 +7,8 @@ ENV_FILE="${ENV_DIR}/books.env"
 OPT_DIR=/opt/books
 OPT_BIN="${OPT_DIR}/bin"
 NGINX_CONF=/etc/nginx/conf.d/books.conf
-SYSTEMD_UNIT=/etc/systemd/system/books-calibre.service
-CALIBRE_WEB_SYSTEMD_UNIT=/etc/systemd/system/books-calibre-web.service
-PORTAL_SYSTEMD_UNIT=/etc/systemd/system/books-portal.service
+CALIBRE_SYSTEMD_UNIT=/etc/systemd/system/books-calibre.service
+NODE_SYSTEMD_UNIT=/etc/systemd/system/books-node.service
 KOSYNC_SYSTEMD_UNIT=/etc/systemd/system/books-kosync.service
 HARDCOVER_SYSTEMD_UNIT=/etc/systemd/system/books-hardcover-sync.service
 HARDCOVER_SYSTEMD_TIMER=/etc/systemd/system/books-hardcover-sync.timer
@@ -36,18 +35,14 @@ while [[ $# -gt 0 ]]; do
       cat <<'EOF'
 Usage: ./scripts/onboard [--non-interactive] [--skip-start]
 
-Installs and configures the personal books service:
-  - official calibre binary
-  - Calibre-Web owner web UI
+Installs and configures the Books service:
+  - official Calibre binary
+  - Node app and CLI
   - Anna's Archive MCP/CLI binary
   - official KOReader Sync Server
   - /etc/books/books.env
   - /srv/books data directories
-  - books-calibre systemd service
-  - books-calibre-web systemd service
-  - books-portal systemd service
-  - books-kosync systemd service
-  - books-hardcover-sync systemd timer
+  - systemd services for Calibre, Node, KOSync, and Hardcover sync
   - nginx gate on BOOKS_PROXY_PORT
   - repo-local Codex books skill symlink
 EOF
@@ -70,122 +65,59 @@ load_existing_env() {
 }
 
 rand_secret() {
-  local length="${1:-24}"
-  local value
-  value="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${length}" || true)"
-  printf '%s' "${value}"
-}
-
-jwt_for_role() {
-  local role="$1"
-  local secret="$2"
-  python3 - "$role" "$secret" <<'PY'
-import base64
-import hashlib
-import hmac
-import json
-import sys
-
-role, secret = sys.argv[1], sys.argv[2].encode()
-
-def b64url(raw):
-    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
-
-header = {"alg": "HS256", "typ": "JWT"}
-payload = {"role": role}
-head = b64url(json.dumps(header, separators=(",", ":")).encode())
-body = b64url(json.dumps(payload, separators=(",", ":")).encode())
-sig = b64url(hmac.new(secret, f"{head}.{body}".encode(), hashlib.sha256).digest())
-print(f"{head}.{body}.{sig}")
-PY
+  LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-24}" || true
 }
 
 ask() {
-  local name="$1"
-  local prompt="$2"
-  local default="$3"
-  local value
-
+  local name="$1" prompt="$2" default="$3" value
   if [[ "${non_interactive}" == true ]]; then
     printf -v "${name}" '%s' "${default}"
     return
   fi
-
   read -r -p "${prompt} [${default}]: " value
   printf -v "${name}" '%s' "${value:-${default}}"
 }
 
 ask_secret() {
-  local name="$1"
-  local prompt="$2"
-  local existing="${3:-}"
-  local value generated
-
+  local name="$1" prompt="$2" existing="${3:-}" value
   if [[ "${non_interactive}" == true ]]; then
-    if [[ -n "${existing}" ]]; then
-      printf -v "${name}" '%s' "${existing}"
-    else
-      generated="$(rand_secret)"
-      printf -v "${name}" '%s' "${generated}"
-    fi
+    printf -v "${name}" '%s' "${existing:-$(rand_secret)}"
     return
   fi
-
   if [[ -n "${existing}" ]]; then
     read -r -s -p "${prompt} [leave blank to keep existing]: " value
-    echo
-    printf -v "${name}" '%s' "${value:-${existing}}"
   else
     read -r -s -p "${prompt} [leave blank to generate]: " value
-    echo
-    if [[ -z "${value}" ]]; then
-      value="$(rand_secret)"
-      echo "Generated ${name}."
-    fi
-    printf -v "${name}" '%s' "${value}"
+    [[ -z "${value}" ]] && value="$(rand_secret)" && echo "Generated ${name}."
   fi
+  echo
+  printf -v "${name}" '%s' "${value:-${existing}}"
 }
 
 ask_optional_secret() {
-  local name="$1"
-  local prompt="$2"
-  local existing="${3:-}"
-  local value
-
+  local name="$1" prompt="$2" existing="${3:-}" value
   if [[ "${non_interactive}" == true ]]; then
     printf -v "${name}" '%s' "${existing}"
     return
   fi
-
   if [[ -n "${existing}" ]]; then
     read -r -s -p "${prompt} [leave blank to keep existing]: " value
-    echo
-    printf -v "${name}" '%s' "${value:-${existing}}"
   else
     read -r -s -p "${prompt} [leave blank to skip for now]: " value
-    echo
-    printf -v "${name}" '%s' "${value}"
   fi
+  echo
+  printf -v "${name}" '%s' "${value:-${existing}}"
 }
 
 shell_quote() {
-  local value="$1"
-  printf "'%s'" "${value//\'/\'\\\'\'}"
-}
-
-sql_literal() {
-  local value="$1"
-  printf "'%s'" "${value//\'/\'\'}"
+  printf "'%s'" "${1//\'/\'\\\'\'}"
 }
 
 write_env() {
-  local old_umask
   install -d -m 0755 "${ENV_DIR}"
-  old_umask="$(umask)"
   umask 077
   {
     printf 'BOOKS_PUBLIC_HOST=%s\n' "$(shell_quote "${BOOKS_PUBLIC_HOST}")"
-    printf 'BOOKS_ALLOWED_EMAIL=%s\n' "$(shell_quote "${BOOKS_ALLOWED_EMAIL}")"
     printf 'BOOKS_PROXY_PORT=%s\n' "$(shell_quote "${BOOKS_PROXY_PORT}")"
     printf 'BOOKS_DATA_DIR=%s\n' "$(shell_quote "${BOOKS_DATA_DIR}")"
     printf 'BOOKS_LIBRARY_DIR=%s\n' "$(shell_quote "${BOOKS_LIBRARY_DIR}")"
@@ -195,22 +127,14 @@ write_env() {
     printf 'BOOKS_CONFIG_DIR=%s\n' "$(shell_quote "${BOOKS_CONFIG_DIR}")"
     printf 'BOOKS_USERDB=%s\n' "$(shell_quote "${BOOKS_USERDB}")"
     printf 'BOOKS_ACCOUNTS_DB=%s\n' "$(shell_quote "${BOOKS_ACCOUNTS_DB}")"
-    printf 'BOOKS_REQUESTS_DIR=%s\n' "$(shell_quote "${BOOKS_REQUESTS_DIR}")"
     printf 'BOOKS_CALIBRE_LIBRARY_ID=%s\n' "$(shell_quote "${BOOKS_CALIBRE_LIBRARY_ID}")"
-    printf 'BOOKS_PORTAL_PORT=%s\n' "$(shell_quote "${BOOKS_PORTAL_PORT}")"
+    printf 'BOOKS_NODE_PORT=%s\n' "$(shell_quote "${BOOKS_NODE_PORT}")"
     printf 'CALIBRE_PORT=%s\n' "$(shell_quote "${CALIBRE_PORT}")"
     printf 'CALIBRE_VERSION=%s\n' "$(shell_quote "${CALIBRE_VERSION}")"
     printf 'CALIBRE_ADMIN_USER=%s\n' "$(shell_quote "${CALIBRE_ADMIN_USER}")"
     printf 'CALIBRE_ADMIN_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_ADMIN_PASSWORD}")"
     printf 'CALIBRE_OPDS_USER=%s\n' "$(shell_quote "${CALIBRE_OPDS_USER}")"
     printf 'CALIBRE_OPDS_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_OPDS_PASSWORD}")"
-    printf 'CALIBRE_WEB_PORT=%s\n' "$(shell_quote "${CALIBRE_WEB_PORT}")"
-    printf 'CALIBRE_WEB_VERSION=%s\n' "$(shell_quote "${CALIBRE_WEB_VERSION}")"
-    printf 'CALIBRE_WEB_DIR=%s\n' "$(shell_quote "${CALIBRE_WEB_DIR}")"
-    printf 'CALIBRE_WEB_DB=%s\n' "$(shell_quote "${CALIBRE_WEB_DB}")"
-    printf 'CALIBRE_WEB_GDRIVE_DB=%s\n' "$(shell_quote "${CALIBRE_WEB_GDRIVE_DB}")"
-    printf 'CALIBRE_WEB_ADMIN_USER=%s\n' "$(shell_quote "${CALIBRE_WEB_ADMIN_USER}")"
-    printf 'CALIBRE_WEB_ADMIN_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_WEB_ADMIN_PASSWORD}")"
     printf 'KOSYNC_PORT=%s\n' "$(shell_quote "${KOSYNC_PORT}")"
     printf 'KOSYNC_IMAGE=%s\n' "$(shell_quote "${KOSYNC_IMAGE}")"
     printf 'KOSYNC_CONTAINER=%s\n' "$(shell_quote "${KOSYNC_CONTAINER}")"
@@ -225,33 +149,15 @@ write_env() {
     printf 'BOOKS_DEFAULT_LANGUAGE=%s\n' "$(shell_quote "${BOOKS_DEFAULT_LANGUAGE}")"
     printf 'BOOKS_DEFAULT_TAGS=%s\n' "$(shell_quote "${BOOKS_DEFAULT_TAGS}")"
   } > "${ENV_FILE}"
-  chmod 0600 "${ENV_FILE}"
-  umask "${old_umask}"
-}
-
-ensure_env_permissions() {
-  chown root:books "${ENV_FILE}"
   chmod 0640 "${ENV_FILE}"
+  chown root:books "${ENV_FILE}" 2>/dev/null || true
 }
 
 ensure_packages() {
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    ca-certificates \
-    curl \
-    docker.io \
-    git \
-    jq \
-    nginx \
-    python3 \
-    python3-venv \
-    sqlite3 \
-    libmagic1 \
-    wget \
-    xdg-utils \
-    xz-utils \
-    libxcb-cursor0 \
-    libopengl0
+    ca-certificates curl docker.io git jq nginx nodejs sqlite3 wget xdg-utils xz-utils \
+    libxcb-cursor0 libopengl0 zip
 }
 
 ensure_calibre() {
@@ -259,40 +165,13 @@ ensure_calibre() {
   if command -v ebook-convert >/dev/null 2>&1; then
     current_version="$(ebook-convert --version | awk 'NR==1 {gsub(/[()]/, "", $3); print $3}')"
   fi
-
-  if [[ -n "${current_version}" && ( -z "${CALIBRE_VERSION:-}" || "${current_version}" == "${CALIBRE_VERSION}" ) ]]; then
+  if [[ -n "${current_version}" && "${current_version}" == "${CALIBRE_VERSION}" ]]; then
     return
   fi
-
-  if [[ -n "${current_version}" && -n "${CALIBRE_VERSION:-}" && "${current_version}" != "${CALIBRE_VERSION}" ]] && command -v calibre-uninstall >/dev/null 2>&1; then
+  if [[ -n "${current_version}" ]] && command -v calibre-uninstall >/dev/null 2>&1; then
     calibre-uninstall || true
   fi
-
-  if [[ -n "${CALIBRE_VERSION:-}" ]]; then
-    wget -nv -O- https://download.calibre-ebook.com/linux-installer.sh | sh /dev/stdin "version=${CALIBRE_VERSION}"
-  else
-    wget -nv -O- https://download.calibre-ebook.com/linux-installer.sh | sh /dev/stdin
-  fi
-}
-
-ensure_calibre_web() {
-  local venv="${OPT_DIR}/calibre-web-venv"
-  local installed_version=""
-
-  install -d -m 0755 "${OPT_DIR}"
-
-  if [[ -x "${venv}/bin/cps" ]]; then
-    installed_version="$("${venv}/bin/cps" --version 2>/dev/null | sed -nE 's/^Calibre-Web version: ([^ ]+).*/\1/p')"
-  fi
-
-  if [[ "${installed_version}" != "${CALIBRE_WEB_VERSION}" ]]; then
-    rm -rf "${venv}"
-    (umask 022 && python3 -m venv "${venv}")
-    HOME=/root "${venv}/bin/pip" install --upgrade pip
-    HOME=/root "${venv}/bin/pip" install "calibreweb==${CALIBRE_WEB_VERSION}"
-  fi
-  HOME=/root "${venv}/bin/pip" install "greenlet>=0.4.17,<3.3.0"
-  chmod -R a+rX "${venv}"
+  wget -nv -O- https://download.calibre-ebook.com/linux-installer.sh | sh /dev/stdin "version=${CALIBRE_VERSION}"
 }
 
 annas_asset_suffix() {
@@ -300,26 +179,20 @@ annas_asset_suffix() {
     x86_64|amd64) echo "linux_amd64" ;;
     aarch64|arm64) echo "linux_arm64" ;;
     armv7l|armv6l) echo "linux_arm" ;;
-    *)
-      echo "Unsupported architecture for annas-mcp: $(uname -m)" >&2
-      exit 1
-      ;;
+    *) echo "Unsupported architecture for annas-mcp: $(uname -m)" >&2; exit 1 ;;
   esac
 }
 
 ensure_annas_mcp() {
   install -d -m 0755 "${OPT_BIN}"
-  local version_no_v="${ANNAS_VERSION#v}"
-  local suffix asset checksums url tmpdir
+  local version_no_v="${ANNAS_VERSION#v}" suffix asset checksums url tmpdir
   suffix="$(annas_asset_suffix)"
   asset="annas-mcp_${version_no_v}_${suffix}.tar.xz"
   checksums="annas-mcp_${version_no_v}--checksums.txt"
   url="https://github.com/iosifache/annas-mcp/releases/download/${ANNAS_VERSION}"
-
   if [[ -x "${OPT_BIN}/annas-mcp" ]] && "${OPT_BIN}/annas-mcp" --version 2>/dev/null | grep -q "${version_no_v}"; then
     return
   fi
-
   tmpdir="$(mktemp -d)"
   curl -fsSLo "${tmpdir}/${asset}" "${url}/${asset}"
   curl -fsSLo "${tmpdir}/${checksums}" "${url}/${checksums}"
@@ -332,105 +205,34 @@ ensure_annas_mcp() {
 }
 
 ensure_users_and_dirs() {
-  if ! getent group books >/dev/null; then
-    groupadd --system books
-  fi
-  if ! id books >/dev/null 2>&1; then
-    useradd --system --gid books --home-dir "${BOOKS_DATA_DIR}" --shell /usr/sbin/nologin books
-  fi
-  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    usermod -aG books "${SUDO_USER}" || true
-  fi
+  getent group books >/dev/null || groupadd --system books
+  id books >/dev/null 2>&1 || useradd --system --gid books --home-dir "${BOOKS_DATA_DIR}" --shell /usr/sbin/nologin books
+  [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]] && usermod -aG books "${SUDO_USER}" || true
 
   install -d -o books -g books -m 0750 "${BOOKS_DATA_DIR}" "${BOOKS_CONFIG_DIR}" "${BOOKS_LOG_DIR}"
-  install -d -o books -g books -m 0750 "${CALIBRE_WEB_DIR}"
   install -d -o books -g books -m 0750 "${KOSYNC_DATA_DIR}" "${KOSYNC_DATA_DIR}/redis" "${KOSYNC_LOG_DIR}" "${KOSYNC_LOG_DIR}/redis" "${KOSYNC_LOG_DIR}/app"
-  install -d -o books -g books -m 2770 "${BOOKS_LIBRARY_DIR}" "${BOOKS_DOWNLOAD_DIR}" "${BOOKS_IMPORT_DIR}" "${BOOKS_REQUESTS_DIR}"
+  install -d -o books -g books -m 2770 "${BOOKS_LIBRARY_DIR}" "${BOOKS_DOWNLOAD_DIR}" "${BOOKS_IMPORT_DIR}"
   if [[ ! -f "${BOOKS_LIBRARY_DIR}/metadata.db" ]]; then
     runuser -u books -- calibredb --with-library "${BOOKS_LIBRARY_DIR}" list >/dev/null
   fi
 }
 
-ensure_calibre_web_db() {
-  local old_user=""
-  local calibre_dir_sql log_sql access_log_sql converter_sql binaries_sql admin_user_sql email_sql
-
-  calibre_web_db_ready() {
-    [[ -f "${CALIBRE_WEB_DB}" ]] &&
-      sqlite3 "file:${CALIBRE_WEB_DB}?mode=ro" "select 1 from settings limit 1;" >/dev/null 2>&1
-  }
-
-  if ! calibre_web_db_ready; then
-    rm -f "${CALIBRE_WEB_DB}" "${CALIBRE_WEB_GDRIVE_DB}"
-    runuser -u books -- env HOME="${BOOKS_DATA_DIR}" \
-      "${OPT_DIR}/calibre-web-venv/bin/cps" \
-      -p "${CALIBRE_WEB_DB}" \
-      -g "${CALIBRE_WEB_GDRIVE_DB}" \
-      -i 127.0.0.1 \
-      -o "${BOOKS_LOG_DIR}/calibre-web-bootstrap.log" >/tmp/books-calibre-web-bootstrap.log 2>&1 &
-    local pid=$!
-    for _ in $(seq 1 40); do
-      if calibre_web_db_ready; then
-        break
-      fi
-      sleep 0.5
-    done
-    kill "${pid}" 2>/dev/null || true
-    wait "${pid}" 2>/dev/null || true
-    if ! calibre_web_db_ready; then
-      echo "Calibre-Web failed to bootstrap ${CALIBRE_WEB_DB}." >&2
-      sed -n '1,160p' /tmp/books-calibre-web-bootstrap.log >&2 || true
-      exit 1
-    fi
-  fi
-
-  calibre_dir_sql="$(sql_literal "${BOOKS_LIBRARY_DIR}")"
-  log_sql="$(sql_literal "${BOOKS_LOG_DIR}/calibre-web.log")"
-  access_log_sql="$(sql_literal "${BOOKS_LOG_DIR}/calibre-web-access.log")"
-  converter_sql="$(sql_literal "/usr/bin/ebook-convert")"
-  binaries_sql="$(sql_literal "/opt/calibre/")"
-  admin_user_sql="$(sql_literal "${CALIBRE_WEB_ADMIN_USER}")"
-  email_sql="$(sql_literal "${BOOKS_ALLOWED_EMAIL}")"
-
-  sqlite3 "${CALIBRE_WEB_DB}" <<SQL
-update settings
-set config_calibre_dir = ${calibre_dir_sql},
-    config_port = ${CALIBRE_WEB_PORT},
-    config_external_port = 443,
-    config_calibre_web_title = 'Books',
-    config_logfile = ${log_sql},
-    config_access_log = 1,
-    config_access_logfile = ${access_log_sql},
-    config_uploading = 0,
-    config_anonbrowse = 0,
-    config_public_reg = 0,
-    config_remote_login = 0,
-    config_kobo_sync = 0,
-    config_kobo_proxy = 0,
-    config_register_email = 0,
-    config_converterpath = ${converter_sql},
-    config_binariesdir = ${binaries_sql},
-    config_embed_metadata = 0,
-    config_updatechannel = 0,
-    config_password_policy = 0,
-    config_ratelimiter = 1
-where id = 1;
-SQL
-
-  if sqlite3 "${CALIBRE_WEB_DB}" "select 1 from user where name=${admin_user_sql} limit 1;" | grep -q 1; then
-    "${OPT_DIR}/calibre-web-venv/bin/cps" -p "${CALIBRE_WEB_DB}" -g "${CALIBRE_WEB_GDRIVE_DB}" -s "${CALIBRE_WEB_ADMIN_USER}:${CALIBRE_WEB_ADMIN_PASSWORD}" >/dev/null
+ensure_node_app() {
+  if [[ -f "${ROOT_DIR}/package-lock.json" ]]; then
+    npm ci --omit=dev --prefix "${ROOT_DIR}"
   else
-    old_user="$(sqlite3 "${CALIBRE_WEB_DB}" "select name from user where id=1;")"
-    "${OPT_DIR}/calibre-web-venv/bin/cps" -p "${CALIBRE_WEB_DB}" -g "${CALIBRE_WEB_GDRIVE_DB}" -s "${old_user}:${CALIBRE_WEB_ADMIN_PASSWORD}" >/dev/null
-    sqlite3 "${CALIBRE_WEB_DB}" "update user set name=${admin_user_sql}, email=${email_sql}, locale='en', default_language='all' where id=1;"
+    npm install --omit=dev --prefix "${ROOT_DIR}"
   fi
+  npm run check --prefix "${ROOT_DIR}"
+}
 
-  chown -R books:books "${CALIBRE_WEB_DIR}"
-  chmod 0750 "${CALIBRE_WEB_DIR}"
-  chmod 0640 "${CALIBRE_WEB_DB}" "${CALIBRE_WEB_GDRIVE_DB}" 2>/dev/null || true
-  touch "${BOOKS_LOG_DIR}/calibre-web.log" "${BOOKS_LOG_DIR}/calibre-web-access.log"
-  chown books:books "${BOOKS_LOG_DIR}/calibre-web.log" "${BOOKS_LOG_DIR}/calibre-web-access.log"
-  chmod 0644 "${BOOKS_LOG_DIR}/calibre-web.log" "${BOOKS_LOG_DIR}/calibre-web-access.log"
+ensure_state_permissions() {
+  local file
+  for file in "${BOOKS_ACCOUNTS_DB}" "${BOOKS_ACCOUNTS_DB}-wal" "${BOOKS_ACCOUNTS_DB}-shm"; do
+    [[ -e "${file}" ]] || continue
+    chown books:books "${file}" 2>/dev/null || true
+    chmod 0660 "${file}" 2>/dev/null || true
+  done
 }
 
 calibre_user_exists() {
@@ -438,11 +240,7 @@ calibre_user_exists() {
 }
 
 ensure_calibre_user() {
-  local user="$1"
-  local password="$2"
-  local readonly="$3"
-  local can_change_password="$4"
-
+  local user="$1" password="$2" readonly="$3" can_change_password="$4"
   if calibre_user_exists "${user}"; then
     calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- chpass "${user}" "${password}"
   else
@@ -464,41 +262,23 @@ ensure_calibre_userdb() {
 }
 
 render_template() {
-  local src="$1"
-  local dest="$2"
-  local tmp
+  local src="$1" dest="$2" tmp
   tmp="$(mktemp)"
   sed \
-    -e "s|__BOOKS_ALLOWED_EMAIL__|${BOOKS_ALLOWED_EMAIL}|g" \
     -e "s|__BOOKS_PROXY_PORT__|${BOOKS_PROXY_PORT}|g" \
+    -e "s|__BOOKS_NODE_PORT__|${BOOKS_NODE_PORT}|g" \
     -e "s|__CALIBRE_PORT__|${CALIBRE_PORT}|g" \
-    -e "s|__CALIBRE_WEB_PORT__|${CALIBRE_WEB_PORT}|g" \
-    -e "s|__BOOKS_PORTAL_PORT__|${BOOKS_PORTAL_PORT}|g" \
     -e "s|__KOSYNC_PORT__|${KOSYNC_PORT}|g" \
     "${src}" > "${tmp}"
   install -m 0644 "${tmp}" "${dest}"
   rm -f "${tmp}"
 }
 
-install_wrappers() {
-  install -d -m 0755 "${OPT_BIN}"
-  install -m 0755 "${ROOT_DIR}/bin/books-annas" "${OPT_BIN}/books-annas"
-  install -m 0755 "${ROOT_DIR}/bin/books-import" "${OPT_BIN}/books-import"
-  install -m 0755 "${ROOT_DIR}/bin/books-sync-fixture" "${OPT_BIN}/books-sync-fixture"
-  install -m 0755 "${ROOT_DIR}/bin/books-users" "${OPT_BIN}/books-users"
-  install -m 0755 "${ROOT_DIR}/bin/books-portal" "${OPT_BIN}/books-portal"
-  install -m 0755 "${ROOT_DIR}/bin/books-hardcover-sync" "${OPT_BIN}/books-hardcover-sync"
-}
-
-retire_legacy_readest_stack() {
-  if systemctl list-unit-files books-readest.service >/dev/null 2>&1; then
-    systemctl disable --now books-readest.service >/dev/null 2>&1 || true
-  fi
-  rm -f /etc/systemd/system/books-readest.service
-  if [[ -d "${BOOKS_DATA_DIR}/readest" && -f "${BOOKS_DATA_DIR}/readest/compose.yaml" ]]; then
-    docker compose --env-file "${BOOKS_DATA_DIR}/readest/.env" -f "${BOOKS_DATA_DIR}/readest/compose.yaml" down >/dev/null 2>&1 || true
-  fi
-  systemctl daemon-reload
+retire_removed_services() {
+  systemctl disable --now books-calibre-web.service >/dev/null 2>&1 || true
+  systemctl disable --now books-portal.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/books-calibre-web.service /etc/systemd/system/books-portal.service
+  rm -f /opt/books/bin/books-users /opt/books/bin/books-portal /opt/books/bin/books-hardcover-sync /opt/books/bin/books-import /opt/books/bin/books-sync-fixture /opt/books/bin/books-annas
 }
 
 ensure_kosync_image() {
@@ -507,25 +287,19 @@ ensure_kosync_image() {
 }
 
 install_services() {
-  install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre.service" "${SYSTEMD_UNIT}"
-  install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre-web.service" "${CALIBRE_WEB_SYSTEMD_UNIT}"
-  install -m 0644 "${ROOT_DIR}/config/systemd/books-portal.service" "${PORTAL_SYSTEMD_UNIT}"
+  install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre.service" "${CALIBRE_SYSTEMD_UNIT}"
+  install -m 0644 "${ROOT_DIR}/config/systemd/books-node.service" "${NODE_SYSTEMD_UNIT}"
   install -m 0644 "${ROOT_DIR}/config/systemd/books-kosync.service" "${KOSYNC_SYSTEMD_UNIT}"
   install -m 0644 "${ROOT_DIR}/config/systemd/books-hardcover-sync.service" "${HARDCOVER_SYSTEMD_UNIT}"
   install -m 0644 "${ROOT_DIR}/config/systemd/books-hardcover-sync.timer" "${HARDCOVER_SYSTEMD_TIMER}"
   render_template "${ROOT_DIR}/config/nginx/books.conf.template" "${NGINX_CONF}"
-  if [[ -L /etc/nginx/sites-enabled/default ]]; then
-    rm -f /etc/nginx/sites-enabled/default
-  fi
+  [[ -L /etc/nginx/sites-enabled/default ]] && rm -f /etc/nginx/sites-enabled/default
   systemctl daemon-reload
   nginx -t
   if [[ "${skip_start}" != true ]]; then
-    systemctl enable books-calibre books-calibre-web books-portal books-kosync books-hardcover-sync.timer nginx
-    systemctl restart books-calibre
-    systemctl restart books-calibre-web
-    systemctl restart books-portal
-    systemctl restart books-kosync
-    systemctl start books-hardcover-sync.timer
+    systemctl enable books-calibre books-node books-kosync books-hardcover-sync.timer nginx
+    systemctl restart books-calibre books-node books-kosync
+    systemctl restart books-hardcover-sync.timer
     systemctl enable --now nginx
     systemctl reload nginx
   fi
@@ -540,7 +314,6 @@ install_skill() {
 load_existing_env
 
 ask BOOKS_PUBLIC_HOST "Public host" "${BOOKS_PUBLIC_HOST:-books.exe.xyz}"
-ask BOOKS_ALLOWED_EMAIL "Allowed exe.dev email for browser UI" "${BOOKS_ALLOWED_EMAIL:-neil.skaria@gmail.com}"
 ask BOOKS_PROXY_PORT "Local nginx proxy port" "${BOOKS_PROXY_PORT:-8000}"
 ask BOOKS_DATA_DIR "Data directory" "${BOOKS_DATA_DIR:-/srv/books}"
 
@@ -551,18 +324,15 @@ BOOKS_LOG_DIR="${BOOKS_LOG_DIR:-${BOOKS_DATA_DIR}/log}"
 BOOKS_CONFIG_DIR="${BOOKS_CONFIG_DIR:-${BOOKS_DATA_DIR}/config}"
 BOOKS_USERDB="${BOOKS_USERDB:-${BOOKS_CONFIG_DIR}/users.sqlite}"
 BOOKS_ACCOUNTS_DB="${BOOKS_ACCOUNTS_DB:-${BOOKS_CONFIG_DIR}/accounts.sqlite}"
-BOOKS_REQUESTS_DIR="${BOOKS_REQUESTS_DIR:-${BOOKS_DATA_DIR}/requests}"
 BOOKS_CALIBRE_LIBRARY_ID="${BOOKS_CALIBRE_LIBRARY_ID:-library}"
-BOOKS_PORTAL_PORT="${BOOKS_PORTAL_PORT:-8090}"
+BOOKS_NODE_PORT="${BOOKS_NODE_PORT:-8090}"
 
 ask CALIBRE_PORT "Calibre localhost port" "${CALIBRE_PORT:-8080}"
 ask CALIBRE_VERSION "Calibre version" "${CALIBRE_VERSION:-9.9.0}"
 ask CALIBRE_ADMIN_USER "Calibre admin user" "${CALIBRE_ADMIN_USER:-books_admin}"
 ask_secret CALIBRE_ADMIN_PASSWORD "Calibre admin password" "${CALIBRE_ADMIN_PASSWORD:-}"
-ask CALIBRE_OPDS_USER "Crosspoint/OPDS user" "${CALIBRE_OPDS_USER:-crosspoint}"
+ask CALIBRE_OPDS_USER "Default OPDS user" "${CALIBRE_OPDS_USER:-crosspoint}"
 ask_secret CALIBRE_OPDS_PASSWORD "Default OPDS password" "${CALIBRE_OPDS_PASSWORD:-}"
-ask CALIBRE_WEB_PORT "Calibre-Web localhost port" "${CALIBRE_WEB_PORT:-8083}"
-ask CALIBRE_WEB_VERSION "Calibre-Web version" "${CALIBRE_WEB_VERSION:-0.6.26}"
 ask ANNAS_VERSION "Anna's Archive MCP version" "${ANNAS_VERSION:-v0.0.5}"
 ask ANNAS_BASE_URL "Anna's Archive mirror host" "${ANNAS_BASE_URL:-annas-archive.li}"
 ask_optional_secret ANNAS_SECRET_KEY "Anna's Archive API key" "${ANNAS_SECRET_KEY:-}"
@@ -571,18 +341,9 @@ ANNAS_DOWNLOAD_PATH="${ANNAS_DOWNLOAD_PATH:-${BOOKS_DOWNLOAD_DIR}}"
 HARDCOVER_DAILY_DOWNLOAD_CAP="${HARDCOVER_DAILY_DOWNLOAD_CAP:-15}"
 BOOKS_DEFAULT_LANGUAGE="${BOOKS_DEFAULT_LANGUAGE:-eng}"
 BOOKS_DEFAULT_TAGS="${BOOKS_DEFAULT_TAGS:-agent-imported}"
-CALIBRE_WEB_DIR="${CALIBRE_WEB_DIR:-${BOOKS_DATA_DIR}/calibre-web}"
-CALIBRE_WEB_DB="${CALIBRE_WEB_DB:-${CALIBRE_WEB_DIR}/app.db}"
-CALIBRE_WEB_GDRIVE_DB="${CALIBRE_WEB_GDRIVE_DB:-${CALIBRE_WEB_DIR}/gdrive.db}"
-CALIBRE_WEB_ADMIN_USER="${CALIBRE_WEB_ADMIN_USER:-${CALIBRE_ADMIN_USER}}"
-if [[ -z "${CALIBRE_WEB_ADMIN_PASSWORD:-}" ]]; then
-  CALIBRE_WEB_ADMIN_PASSWORD="${CALIBRE_ADMIN_PASSWORD}"
-fi
 KOSYNC_PORT="${KOSYNC_PORT:-7200}"
 KOSYNC_IMAGE="${KOSYNC_IMAGE:-koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1}"
-if [[ "${KOSYNC_IMAGE}" == "koreader/kosync:latest" ]]; then
-  KOSYNC_IMAGE="koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1"
-fi
+[[ "${KOSYNC_IMAGE}" == "koreader/kosync:latest" ]] && KOSYNC_IMAGE="koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1"
 KOSYNC_CONTAINER="${KOSYNC_CONTAINER:-books-kosync}"
 KOSYNC_DATA_DIR="${KOSYNC_DATA_DIR:-${BOOKS_DATA_DIR}/kosync}"
 KOSYNC_LOG_DIR="${KOSYNC_LOG_DIR:-${BOOKS_LOG_DIR}/kosync}"
@@ -591,26 +352,22 @@ KOSYNC_ENABLE_REGISTRATION="${KOSYNC_ENABLE_REGISTRATION:-false}"
 write_env
 ensure_packages
 ensure_calibre
-ensure_calibre_web
 ensure_users_and_dirs
-ensure_env_permissions
+ensure_node_app
 ensure_annas_mcp
-install_wrappers
-retire_legacy_readest_stack
+retire_removed_services
 ensure_kosync_image
 ensure_calibre_userdb
-ensure_calibre_web_db
-/opt/books/bin/books-users init
+NODE_OPTIONS=--no-warnings "${ROOT_DIR}/scripts/books" users init
+ensure_state_permissions
 install_services
-/opt/books/bin/books-users reconcile || true
+NODE_OPTIONS=--no-warnings "${ROOT_DIR}/scripts/books" users reconcile || true
+ensure_state_permissions
 install_skill
 
 echo "Books service configured."
 echo "Local health: http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz"
-echo "Books portal: https://${BOOKS_PUBLIC_HOST}/"
-echo "Calibre-Web URL: https://${BOOKS_PUBLIC_HOST}/calibre/"
 echo "Readest Web URL: https://web.readest.com/"
-echo "OPDS URL for Crosspoint: https://${BOOKS_PUBLIC_HOST}/opds"
 echo "Catalog URL for setup pages: https://${BOOKS_PUBLIC_HOST}/catalog"
 echo "KOSync URL for progress: https://${BOOKS_PUBLIC_HOST}/kosync"
 echo "Run ./scripts/books proxy-commands for the documented exe.dev share commands."

@@ -1,43 +1,55 @@
 ---
 name: books
-description: Find, stage, import, and operate books for Neil's personal Calibre EPUB/OPDS service on books.exe.xyz. Use when the user asks to search for books, procure legally authorized EPUB files, import books into Calibre, manage Crosspoint/OPDS access, inspect or restart the book service, update its reproducible setup, or troubleshoot calibre/nginx/exe.dev proxy behavior for this repo.
+description: Operate Neil's self-hosted Books backend on books.exe.xyz: Calibre OPDS, KOSync progress, Readest setup, Hardcover intake, Anna's Archive MCP downloads, imports, user credentials, nginx, systemd, and reproducible onboarding.
 ---
 
 # Books
 
-## Core Workflow
+## Use The Repo Helper
 
-Use the repo helpers from `/home/exedev/books` rather than ad hoc commands:
+Work from `/home/exedev/books`.
 
-- Inspect health with `./scripts/books health` and status with `./scripts/books status`.
-- Run `./scripts/books verify USER` after deployment or auth changes.
-- Import EPUBs with `./scripts/books import /path/to/book.epub`.
-- Generate/import the test EPUB for real-device progress checks with `./scripts/books sync-fixture`.
-- Convert only when needed with `./scripts/books import --convert /path/to/file`.
-- Use Anna's Archive MCP/CLI through `./scripts/books anna ...` after the user's API key is configured.
-- Show Crosspoint setup values with `./scripts/books opds-url`.
-- Show KOSync setup values with `./scripts/books kosync-url`.
-- Show the owner-only Calibre-Web reader URL with `./scripts/books web-url`.
-- Use official Readest at `https://web.readest.com/`; this VM provides OPDS at `/catalog` and progress sync at `/kosync`.
-- Manage family users with `./scripts/books users ...`.
-- Review web book requests with `./scripts/books requests ...`.
-- Show documented exe.dev proxy commands with `./scripts/books proxy-commands`.
+Prefer `./scripts/books` over direct service edits:
 
-Only use acquisition/download tooling for material the user is legally permitted to access, such as public domain, Creative Commons, owned, or otherwise authorized works. When unclear, ask for confirmation before downloading.
+- `./scripts/books status`
+- `./scripts/books health`
+- `./scripts/books verify USER`
+- `./scripts/books restart`
+- `./scripts/books users ...`
+- `./scripts/books hardcover ...`
+- `./scripts/books import /path/to/book.epub`
+- `./scripts/books sync-fixture`
+- `./scripts/books anna ...`
+- `./scripts/books opds-url`
+- `./scripts/books kosync-url`
+- `./scripts/books proxy-commands`
+
+Only use acquisition/download tooling for material the user is legally allowed
+to access, such as public domain, Creative Commons, owned, or otherwise
+authorized books. When that is unclear, ask before downloading.
 
 ## Service Rules
 
-Treat git as the source of truth for installs and config. Do not manually change `/etc/nginx/conf.d/books.conf`, `/etc/systemd/system/books-calibre.service`, `/etc/systemd/system/books-calibre-web.service`, `/opt/books/bin/*`, or `/etc/books/books.env` without also updating the repo script/template that recreates it.
+Git is the source of truth for installs and config. Do not manually change these
+without updating the repo file that recreates them:
 
-Runtime books and secrets are intentionally outside git:
+- `/etc/nginx/conf.d/books.conf`
+- `/etc/systemd/system/books-calibre.service`
+- `/etc/systemd/system/books-kosync.service`
+- `/etc/systemd/system/books-node.service`
+- `/etc/systemd/system/books-hardcover-sync.service`
+- `/etc/systemd/system/books-hardcover-sync.timer`
+- `/etc/books/books.env`
+
+Runtime books and secrets stay outside git:
 
 - `/etc/books/books.env`
 - `/srv/books/library`
 - `/srv/books/downloads`
 - `/srv/books/import`
-- `/srv/books/calibre-web`
-- `/srv/books/kosync`
-- `/srv/books/requests`
 - `/srv/books/config/accounts.sqlite`
+- `/srv/books/config/users.sqlite`
+- `/srv/books/kosync`
 
-Read `references/service.md` before changing deployment, nginx, systemd, Calibre-Web, OPDS, Anna's Archive, or import behavior.
+Read `references/service.md` before changing deployment, nginx, systemd,
+Calibre, OPDS, KOSync, Hardcover, Anna's Archive, or import behavior.

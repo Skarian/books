@@ -17,3 +17,6 @@ library/
 # Python/cache noise
 __pycache__/
 .pytest_cache/
+
+# Node dependencies
+node_modules/

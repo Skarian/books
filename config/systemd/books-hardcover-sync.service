@@ -6,8 +6,10 @@ After=network-online.target books-calibre.service
 [Service]
 Type=oneshot
 EnvironmentFile=/etc/books/books.env
-ExecStart=/opt/books/bin/books-hardcover-sync sync
+WorkingDirectory=/home/exedev/books
+Environment=NODE_OPTIONS=--no-warnings
+ExecStart=/home/exedev/books/scripts/books hardcover sync
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectHome=true
+ProtectSystem=full
 ReadWritePaths=/srv/books
