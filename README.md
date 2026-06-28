@@ -45,20 +45,6 @@ These paths are created by onboarding and are not committed:
 Back up `/etc/books/books.env` and `/srv/books` if you care about the live
 library and user state. Git recreates the machine shape, not the books.
 
-## Existing V1 Databases
-
-Older checkouts used separate setup, OPDS, and KOSync credentials. This repo now
-uses one Books login per reader. Upgrade an old `accounts.sqlite` explicitly:
-
-```bash
-./scripts/books users migrate-v2
-./scripts/books users migrate-v2 --execute
-./scripts/onboard --non-interactive
-```
-
-The migration archives the old database and audit tables under
-`/srv/books/backups/`, then merges legacy KOSync progress into the reader slug.
-
 ## Fresh VM Setup
 
 ```bash

@@ -69,46 +69,6 @@ function kosyncPurgeUser(user) {
   if (keys.length) dockerRedis(["DEL", ...keys], false);
 }
 
-function redisHash(key) {
-  const result = dockerRedis(["HGETALL", key], false);
-  if (result.status !== 0) return null;
-  const lines = result.stdout.split(/\r?\n/).filter(Boolean);
-  if (!lines.length) return null;
-  const hash = {};
-  for (let i = 0; i < lines.length; i += 2) hash[lines[i]] = lines[i + 1] || "";
-  return hash;
-}
-
-function hashTimestamp(hash) {
-  const value = hash && hash.timestamp;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
-}
-
-function mergeKosyncUser(oldUser, newUser) {
-  if (!oldUser || !newUser || oldUser === newUser) return { scanned: 0, copied: 0, skipped: 0, deleted: 0 };
-  const prefix = `user:${oldUser}:document:`;
-  const result = dockerRedis(["--scan", "--pattern", `${prefix}*`], false);
-  const keys = result.stdout.split(/\r?\n/).filter(Boolean);
-  const stats = { scanned: keys.length, copied: 0, skipped: 0, deleted: 0 };
-  for (const key of keys) {
-    const source = redisHash(key);
-    if (!source) continue;
-    const destinationKey = `user:${newUser}:document:${key.slice(prefix.length)}`;
-    const destination = redisHash(destinationKey);
-    if (!destination || hashTimestamp(source) >= hashTimestamp(destination)) {
-      dockerRedis(["HSET", destinationKey, ...Object.entries(source).flat()]);
-      stats.copied += 1;
-    } else {
-      stats.skipped += 1;
-    }
-    dockerRedis(["DEL", key], false);
-    stats.deleted += 1;
-  }
-  kosyncDisableUser(oldUser);
-  return stats;
-}
-
 function reconcileAccount(row) {
   const username = row.slug;
   const password = row.books_password;
@@ -249,7 +209,6 @@ module.exports = {
   ensureDir,
   reconcile,
   kosyncDisableUser,
-  mergeKosyncUser,
   kosyncPurgeUser,
   calibreRemoveUser,
   annas,
