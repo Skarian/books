@@ -27,8 +27,6 @@ services:
 
   calibre:
     image: books-runtime
-    env_file:
-      - .env
     command:
       - calibre-server
       - --listen-on
