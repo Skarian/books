@@ -6,7 +6,7 @@ ARG TARGETARCH
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
-      ca-certificates curl gosu jq libegl1 libfontconfig1 libfreetype6 libglib2.0-0 libnss3 libopengl0 libxcb-cursor0 libxkbcommon0 python3 python-is-python3 redis-tools xdg-utils xz-utils zip \
+      ca-certificates curl gosu jq libasound2 libegl1 libfontconfig1 libfreetype6 libgl1 libglib2.0-0 libnss3 libopengl0 libxcb-cursor0 libxkbcommon0 python3 python-is-python3 redis-tools xdg-utils xz-utils zip \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://download.calibre-ebook.com/linux-installer.sh \
