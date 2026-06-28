@@ -65,6 +65,14 @@ Each reader gets one Books login. It works for setup, OPDS, and KOSync.
 Run `users reconcile` after onboarding or account changes if Calibre/KOSync state
 looks stale.
 
+Old v1 account databases must be migrated before v2 services start:
+
+```bash
+./scripts/books users migrate-v2
+./scripts/books users migrate-v2 --execute
+./scripts/onboard --non-interactive
+```
+
 ## Reader Setup
 
 Tell readers to use hosted Readest:

@@ -133,8 +133,6 @@ write_env() {
     printf 'CALIBRE_VERSION=%s\n' "$(shell_quote "${CALIBRE_VERSION}")"
     printf 'CALIBRE_ADMIN_USER=%s\n' "$(shell_quote "${CALIBRE_ADMIN_USER}")"
     printf 'CALIBRE_ADMIN_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_ADMIN_PASSWORD}")"
-    printf 'CALIBRE_OPDS_USER=%s\n' "$(shell_quote "${CALIBRE_OPDS_USER}")"
-    printf 'CALIBRE_OPDS_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_OPDS_PASSWORD}")"
     printf 'KOSYNC_PORT=%s\n' "$(shell_quote "${KOSYNC_PORT}")"
     printf 'KOSYNC_IMAGE=%s\n' "$(shell_quote "${KOSYNC_IMAGE}")"
     printf 'KOSYNC_CONTAINER=%s\n' "$(shell_quote "${KOSYNC_CONTAINER}")"
@@ -218,12 +216,8 @@ ensure_users_and_dirs() {
 }
 
 ensure_node_app() {
-  if [[ -f "${ROOT_DIR}/package-lock.json" ]]; then
-    npm ci --omit=dev --prefix "${ROOT_DIR}"
-  else
-    npm install --omit=dev --prefix "${ROOT_DIR}"
-  fi
   npm run check --prefix "${ROOT_DIR}"
+  npm test --prefix "${ROOT_DIR}"
 }
 
 ensure_state_permissions() {
@@ -255,8 +249,10 @@ ensure_calibre_user() {
 }
 
 ensure_calibre_userdb() {
-  ensure_calibre_user "${CALIBRE_OPDS_USER}" "${CALIBRE_OPDS_PASSWORD}" set reset
   ensure_calibre_user "${CALIBRE_ADMIN_USER}" "${CALIBRE_ADMIN_PASSWORD}" reset set
+  if [[ -n "${CALIBRE_OPDS_USER:-}" && "${CALIBRE_OPDS_USER}" != "${CALIBRE_ADMIN_USER}" ]]; then
+    calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- remove "${CALIBRE_OPDS_USER}" >/dev/null 2>&1 || true
+  fi
   chown books:books "${BOOKS_USERDB}"
   chmod 0660 "${BOOKS_USERDB}"
 }
@@ -331,8 +327,6 @@ ask CALIBRE_PORT "Calibre localhost port" "${CALIBRE_PORT:-8080}"
 ask CALIBRE_VERSION "Calibre version" "${CALIBRE_VERSION:-9.9.0}"
 ask CALIBRE_ADMIN_USER "Calibre admin user" "${CALIBRE_ADMIN_USER:-books_admin}"
 ask_secret CALIBRE_ADMIN_PASSWORD "Calibre admin password" "${CALIBRE_ADMIN_PASSWORD:-}"
-ask CALIBRE_OPDS_USER "Default OPDS user" "${CALIBRE_OPDS_USER:-crosspoint}"
-ask_secret CALIBRE_OPDS_PASSWORD "Default OPDS password" "${CALIBRE_OPDS_PASSWORD:-}"
 ask ANNAS_VERSION "Anna's Archive MCP version" "${ANNAS_VERSION:-v0.0.5}"
 ask ANNAS_BASE_URL "Anna's Archive mirror host" "${ANNAS_BASE_URL:-annas-archive.li}"
 ask_optional_secret ANNAS_SECRET_KEY "Anna's Archive API key" "${ANNAS_SECRET_KEY:-}"

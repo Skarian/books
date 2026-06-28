@@ -63,25 +63,62 @@ function kosyncDisableUser(user) {
 }
 
 function kosyncPurgeUser(user) {
+  if (!user) return;
   const result = dockerRedis(["--scan", "--pattern", `user:${user}:*`], false);
   const keys = result.stdout.split(/\r?\n/).filter(Boolean);
   if (keys.length) dockerRedis(["DEL", ...keys], false);
 }
 
+function redisHash(key) {
+  const result = dockerRedis(["HGETALL", key], false);
+  if (result.status !== 0) return null;
+  const lines = result.stdout.split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return null;
+  const hash = {};
+  for (let i = 0; i < lines.length; i += 2) hash[lines[i]] = lines[i + 1] || "";
+  return hash;
+}
+
+function hashTimestamp(hash) {
+  const value = hash && hash.timestamp;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function mergeKosyncUser(oldUser, newUser) {
+  if (!oldUser || !newUser || oldUser === newUser) return { scanned: 0, copied: 0, skipped: 0, deleted: 0 };
+  const prefix = `user:${oldUser}:document:`;
+  const result = dockerRedis(["--scan", "--pattern", `${prefix}*`], false);
+  const keys = result.stdout.split(/\r?\n/).filter(Boolean);
+  const stats = { scanned: keys.length, copied: 0, skipped: 0, deleted: 0 };
+  for (const key of keys) {
+    const source = redisHash(key);
+    if (!source) continue;
+    const destinationKey = `user:${newUser}:document:${key.slice(prefix.length)}`;
+    const destination = redisHash(destinationKey);
+    if (!destination || hashTimestamp(source) >= hashTimestamp(destination)) {
+      dockerRedis(["HSET", destinationKey, ...Object.entries(source).flat()]);
+      stats.copied += 1;
+    } else {
+      stats.skipped += 1;
+    }
+    dockerRedis(["DEL", key], false);
+    stats.deleted += 1;
+  }
+  kosyncDisableUser(oldUser);
+  return stats;
+}
+
 function reconcileAccount(row) {
-  const username = state.serviceUser(row);
-  const password = state.servicePassword(row);
+  const username = row.slug;
+  const password = row.books_password;
   if (row.status === "active") {
     calibreSetUser(username, password, true);
-    if (row.opds_user && row.opds_user !== username) calibreRemoveUser(row.opds_user);
     kosyncSetUser(username, password);
-    if (row.kosync_user && row.kosync_user !== username) kosyncDisableUser(row.kosync_user);
     return `reconciled active user ${row.slug}`;
   }
-  calibreSetUser(username, state.randomPassword(), false);
-  if (row.opds_user && row.opds_user !== username) calibreSetUser(row.opds_user, state.randomPassword(), false);
+  calibreRemoveUser(username);
   kosyncDisableUser(username);
-  if (row.kosync_user) kosyncDisableUser(row.kosync_user);
   return `disabled service access for ${row.slug}`;
 }
 
@@ -141,108 +178,11 @@ function importFiles(files, convert = false) {
   }
 }
 
-function writeFile(root, name, content) {
-  const file = path.join(root, name);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, content);
-}
-
-function chapter(title, paragraphs) {
-  const body = paragraphs.map((text) => `    <p>${text}</p>`).join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
-  <head>
-    <title>${title}</title>
-    <style>
-      body { font-family: serif; line-height: 1.55; margin: 2em; }
-      h1 { margin-bottom: 1em; }
-      p { margin: 0 0 1em; }
-    </style>
-  </head>
-  <body>
-    <h1>${title}</h1>
-${body}
-  </body>
-</html>
-`;
-}
-
 function writeSyncFixture(output) {
-  const title = "Books Sync Fixture";
-  const author = "Neil's Books";
-  const identifier = "urn:uuid:1c156b10-24c7-4a3c-a606-7f2e7f7c8c1a";
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "books-fixture-"));
-  try {
-    writeFile(workDir, "mimetype", "application/epub+zip");
-    writeFile(workDir, "META-INF/container.xml", `<?xml version="1.0" encoding="UTF-8"?>
-<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
-  <rootfiles>
-    <rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/>
-  </rootfiles>
-</container>
-`);
-    writeFile(workDir, "EPUB/package.opf", `<?xml version="1.0" encoding="UTF-8"?>
-<package version="3.0" unique-identifier="bookid" xmlns="http://www.idpf.org/2007/opf">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier id="bookid">${identifier}</dc:identifier>
-    <dc:title>${title}</dc:title>
-    <dc:creator>${author}</dc:creator>
-    <dc:language>en</dc:language>
-    <meta property="dcterms:modified">2026-06-26T00:00:00Z</meta>
-  </metadata>
-  <manifest>
-    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
-    <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
-    <item id="chapter2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>
-    <item id="chapter3" href="chapter3.xhtml" media-type="application/xhtml+xml"/>
-  </manifest>
-  <spine>
-    <itemref idref="chapter1"/>
-    <itemref idref="chapter2"/>
-    <itemref idref="chapter3"/>
-  </spine>
-</package>
-`);
-    writeFile(workDir, "EPUB/nav.xhtml", `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="en">
-  <head><title>Contents</title></head>
-  <body>
-    <nav epub:type="toc" id="toc">
-      <h1>Contents</h1>
-      <ol>
-        <li><a href="chapter1.xhtml">Start here</a></li>
-        <li><a href="chapter2.xhtml">Sync marker two</a></li>
-        <li><a href="chapter3.xhtml">Sync marker three</a></li>
-      </ol>
-    </nav>
-  </body>
-</html>
-`);
-    writeFile(workDir, "EPUB/chapter1.xhtml", chapter("Start here", [
-      "This is a generated EPUB for testing Neil's Books.",
-      "It is not a real book. It exists so every device can download the same file from the catalog and try progress sync safely.",
-      "Open this book on one device, move to a marker, then open the same book on another device and pull progress."
-    ]));
-    writeFile(workDir, "EPUB/chapter2.xhtml", chapter("Sync marker two", [
-      "Marker two. Stop somewhere on this page when testing a short sync hop.",
-      "If the second device lands here, the catalog and KOSync are talking about the same EPUB.",
-      "If it opens at the beginning, check that both devices downloaded this book from the catalog."
-    ]));
-    writeFile(workDir, "EPUB/chapter3.xhtml", chapter("Sync marker three", [
-      "Marker three. Use this page for the main test.",
-      "Device one should push progress from here.",
-      "Device two should pull progress and land close to this page.",
-      "A small difference is fine. Opening at the beginning means sync did not work."
-    ]));
-    fs.mkdirSync(path.dirname(output), { recursive: true });
-    fs.rmSync(output, { force: true });
-    run("zip", ["-X0", output, "mimetype"], { cwd: workDir });
-    run("zip", ["-Xr9D", output, "META-INF", "EPUB"], { cwd: workDir });
-  } finally {
-    fs.rmSync(workDir, { recursive: true, force: true });
-  }
+  const fixture = path.join(__dirname, "..", "fixtures", "books-sync-fixture.epub");
+  if (!fs.existsSync(fixture)) throw new Error(`Missing fixture: ${fixture}`);
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.copyFileSync(fixture, output);
 }
 
 async function fetchOk(url, options = {}) {
@@ -253,8 +193,8 @@ async function fetchOk(url, options = {}) {
 
 async function health() {
   const row = state.firstActiveAccount();
-  const user = row ? state.serviceUser(row) : config.calibreAdminUser;
-  const password = row ? state.servicePassword(row) : config.calibreAdminPassword;
+  const user = row ? row.slug : config.calibreAdminUser;
+  const password = row ? row.books_password : config.calibreAdminPassword;
   const auth = Buffer.from(`${user}:${password}`).toString("base64");
   await fetchOk(`http://127.0.0.1:${config.proxyPort}/healthz`);
   await fetchOk(`http://127.0.0.1:${config.proxyPort}/opds`, { headers: { Authorization: `Basic ${auth}` } });
@@ -265,8 +205,8 @@ async function health() {
 async function verify(slug) {
   const row = slug ? state.getAccount(slug) : state.firstActiveAccount();
   if (!row) throw new Error('No active user exists. Create one with ./scripts/books users create "Name" --email person@example.com');
-  const user = state.serviceUser(row);
-  const password = state.servicePassword(row);
+  const user = row.slug;
+  const password = row.books_password;
   const basic = Buffer.from(`${user}:${password}`).toString("base64");
   for (const service of ["books-calibre", "books-node", "books-kosync", "nginx"]) {
     run("systemctl", ["is-active", "--quiet", service]);
@@ -309,6 +249,7 @@ module.exports = {
   ensureDir,
   reconcile,
   kosyncDisableUser,
+  mergeKosyncUser,
   kosyncPurgeUser,
   calibreRemoveUser,
   annas,

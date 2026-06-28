@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const fs = require("fs");
+const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
 const config = require("./config");
 
@@ -15,6 +16,10 @@ let cachedDb;
 
 function now() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+function stamp() {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
 
 function today() {
@@ -33,78 +38,74 @@ function slugify(value) {
 
 function passphrase() {
   const parts = [];
-  for (let i = 0; i < 4; i += 1) {
-    parts.push(WORDS[crypto.randomInt(WORDS.length)]);
-  }
+  for (let i = 0; i < 4; i += 1) parts.push(WORDS[crypto.randomInt(WORDS.length)]);
   return parts.join("-");
 }
 
-function randomPassword() {
-  return crypto.randomBytes(18).toString("base64url");
-}
-
-function db() {
+function db(file = config.accountsDb) {
   if (cachedDb) return cachedDb;
-  fs.mkdirSync(config.configDir, { recursive: true });
-  cachedDb = new DatabaseSync(config.accountsDb);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  cachedDb = new DatabaseSync(file);
   cachedDb.exec("pragma busy_timeout = 5000");
+  cachedDb.exec("pragma foreign_keys = on");
   cachedDb.exec("pragma journal_mode = wal");
-  migrate(cachedDb);
+  ensureSchema(cachedDb);
   return cachedDb;
 }
 
+function closeForTests() {
+  if (cachedDb) cachedDb.close();
+  cachedDb = null;
+}
+
+function scalar(database, sql, params = []) {
+  const row = database.prepare(sql).get(...params);
+  return row ? Object.values(row)[0] : undefined;
+}
+
+function tableExists(database, table) {
+  return Boolean(database.prepare("select 1 from sqlite_schema where type='table' and name=?").get(table));
+}
+
 function columns(database, table) {
+  if (!tableExists(database, table)) return new Set();
   return new Set(database.prepare(`pragma table_info(${table})`).all().map((row) => row.name));
 }
 
-function addColumn(database, table, name, type) {
-  if (!columns(database, table).has(name)) {
-    database.exec(`alter table ${table} add column ${name} ${type}`);
-  }
+function integrity(database) {
+  return scalar(database, "pragma integrity_check");
 }
 
-function migrate(database = db()) {
+function createSchema(database) {
   database.exec(`
+    pragma foreign_keys = on;
     create table if not exists accounts (
-      slug text primary key,
-      display_name text not null,
+      slug text primary key
+        check(length(slug) between 1 and 48
+          and slug not glob '*[^a-z0-9-]*'
+          and slug not like '-%'
+          and slug not like '%-'),
+      display_name text not null check(length(trim(display_name)) > 0),
       email text,
-      status text not null default 'active',
-      roles text not null default 'reader',
-      login_user text unique,
-      login_password text,
-      opds_user text not null unique,
-      opds_password text not null,
-      kosync_user text not null unique,
-      kosync_password text not null,
-      kosync_userkey text not null,
-      setup_user text not null unique,
-      setup_password text not null,
+      status text not null default 'active' check(status in ('active', 'disabled')),
+      books_password text not null check(length(books_password) > 0),
       hardcover_token text,
       hardcover_user_id integer,
       hardcover_username text,
-      hardcover_sync_enabled integer not null default 0,
-      hardcover_updated_at text,
       created_at text not null,
       updated_at text not null,
-      disabled_at text,
-      purged_at text
+      disabled_at text
     );
-    create table if not exists audit_log (
-      id integer primary key autoincrement,
-      created_at text not null,
-      actor text not null,
-      action text not null,
-      target text not null,
-      detail text not null default '{}'
-    );
-    create table if not exists hardcover_processed (
-      user_slug text not null,
-      user_book_id integer not null,
+    create unique index if not exists accounts_hardcover_user_id_uq
+      on accounts(hardcover_user_id)
+      where hardcover_user_id is not null;
+    create table if not exists hardcover_requests (
+      account_slug text not null references accounts(slug) on delete cascade,
+      hardcover_user_book_id integer not null,
       hardcover_book_id integer,
       title text not null,
       author text,
-      status text not null,
+      status text not null check(status in ('downloading', 'fulfilled', 'error')),
       selected_md5 text,
       selected_title text,
       selected_format text,
@@ -115,51 +116,246 @@ function migrate(database = db()) {
       error text,
       created_at text not null,
       updated_at text not null,
-      primary key(user_slug, user_book_id)
+      primary key(account_slug, hardcover_user_book_id)
     );
+    create index if not exists hardcover_requests_status_idx
+      on hardcover_requests(account_slug, status, updated_at);
     create table if not exists hardcover_daily_downloads (
       day text primary key,
-      count integer not null default 0,
+      download_count integer not null default 0 check(download_count >= 0),
       updated_at text not null
     );
+    pragma user_version = 2;
   `);
+}
 
-  const accountColumns = [
-    ["login_user", "text"],
-    ["login_password", "text"],
-    ["hardcover_token", "text"],
-    ["hardcover_user_id", "integer"],
-    ["hardcover_username", "text"],
-    ["hardcover_sync_enabled", "integer not null default 0"],
-    ["hardcover_updated_at", "text"]
-  ];
-  for (const [name, type] of accountColumns) addColumn(database, "accounts", name, type);
+function ensureSchema(database = db()) {
+  if (!tableExists(database, "accounts")) {
+    createSchema(database);
+    return;
+  }
+  if (columns(database, "accounts").has("books_password")) {
+    createSchema(database);
+    return;
+  }
+  throw new Error("accounts.sqlite uses the old schema. Run ./scripts/books users migrate-v2 --execute before starting v2 services.");
+}
 
-  const processedColumns = [
-    ["selected_md5", "text"],
-    ["selected_title", "text"],
-    ["selected_format", "text"],
-    ["selected_language", "text"],
-    ["download_path", "text"],
-    ["imported_at", "text"],
-    ["moved_at", "text"],
-    ["error", "text"]
-  ];
-  for (const [name, type] of processedColumns) addColumn(database, "hardcover_processed", name, type);
+function migrate(database = db()) {
+  ensureSchema(database);
+}
 
-  for (const row of database.prepare("select slug, login_user, login_password from accounts").all()) {
-    const updates = {};
-    if (!row.login_user) updates.login_user = row.slug;
-    if (!row.login_password) updates.login_password = passphrase();
-    if (Object.keys(updates).length) {
-      updateAccount(row.slug, updates, database);
+function readAll(database, table) {
+  return tableExists(database, table) ? database.prepare(`select * from ${table}`).all() : [];
+}
+
+function migrationPlan(dbPath = config.accountsDb) {
+  const database = new DatabaseSync(dbPath);
+  try {
+    database.exec("pragma busy_timeout = 5000");
+    const accountColumns = columns(database, "accounts");
+    if (accountColumns.has("books_password")) {
+      return { alreadyV2: true, dbPath, userVersion: Number(scalar(database, "pragma user_version") || 0) };
     }
+    if (!accountColumns.has("login_password")) throw new Error("Missing login_password column; refusing v2 migration.");
+    const integrityResult = integrity(database);
+    if (integrityResult !== "ok") throw new Error(`SQLite integrity check failed: ${integrityResult}`);
+    const accounts = database.prepare(`
+      select slug, status, login_user, opds_user, kosync_user, setup_user,
+             login_password, opds_password, kosync_password, setup_password,
+             hardcover_sync_enabled, hardcover_token, hardcover_username
+      from accounts order by slug
+    `).all();
+    for (const row of accounts) {
+      if (!row.login_password) throw new Error(`Missing login_password for ${row.slug}; refusing to generate a replacement.`);
+      if ((row.login_user || row.slug) !== row.slug) throw new Error(`login_user must equal slug for ${row.slug}; username rename is not supported.`);
+      if (row.hardcover_sync_enabled && !row.hardcover_token) throw new Error(`Hardcover sync is enabled for ${row.slug}, but token is missing.`);
+    }
+    const orphanRequests = tableExists(database, "hardcover_processed")
+      ? Number(scalar(database, `
+          select count(*)
+          from hardcover_processed hp
+          left join accounts a on a.slug=hp.user_slug
+          where a.slug is null
+        `) || 0)
+      : 0;
+    if (orphanRequests) throw new Error(`Found ${orphanRequests} orphaned Hardcover request row(s).`);
+    return {
+      alreadyV2: false,
+      dbPath,
+      accountCount: accounts.length,
+      requestCount: tableExists(database, "hardcover_processed") ? Number(scalar(database, "select count(*) from hardcover_processed") || 0) : 0,
+      dailyCountRows: tableExists(database, "hardcover_daily_downloads") ? Number(scalar(database, "select count(*) from hardcover_daily_downloads") || 0) : 0,
+      auditRows: tableExists(database, "audit_log") ? Number(scalar(database, "select count(*) from audit_log") || 0) : 0,
+      legacyAccounts: accounts.map((row) => ({
+        slug: row.slug,
+        opds_user: row.opds_user,
+        kosync_user: row.kosync_user,
+        setup_user: row.setup_user
+      }))
+    };
+  } finally {
+    database.close();
   }
 }
 
-function audit(action, target, detail = {}) {
-  db().prepare("insert into audit_log(created_at, actor, action, target, detail) values(?,?,?,?,?)")
-    .run(now(), process.env.USER || "unknown", action, target, JSON.stringify(detail));
+function writeJson(file, value) {
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+}
+
+function sqlQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function archiveV1(database, dbPath, backupDir, plan) {
+  fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  const backupDb = path.join(backupDir, "accounts.sqlite.pre-v2.bak");
+  database.exec(`vacuum main into ${sqlQuote(backupDb)}`);
+  fs.chmodSync(backupDb, 0o600);
+  for (const suffix of ["-wal", "-shm"]) {
+    const source = `${dbPath}${suffix}`;
+    if (fs.existsSync(source)) {
+      const target = path.join(backupDir, `accounts.sqlite${suffix}.pre-v2.bak`);
+      fs.copyFileSync(source, target);
+      fs.chmodSync(target, 0o600);
+    }
+  }
+  const schema = database.prepare("select type, name, sql from sqlite_schema where sql is not null order by type, name").all();
+  writeJson(path.join(backupDir, "accounts.schema.pre-v2.json"), schema);
+  writeJson(path.join(backupDir, "audit_log.pre-v2.json"), readAll(database, "audit_log"));
+  writeJson(path.join(backupDir, "legacy-service-users.pre-v2.json"), plan.legacyAccounts);
+  writeJson(path.join(backupDir, "hardcover_processed.pre-v2.json"), readAll(database, "hardcover_processed"));
+  writeJson(path.join(backupDir, "hardcover_daily_downloads.pre-v2.json"), readAll(database, "hardcover_daily_downloads"));
+}
+
+function migrateV2({ execute = false, dbPath = config.accountsDb, backupDir } = {}) {
+  const plan = migrationPlan(dbPath);
+  if (plan.alreadyV2 || !execute) return plan;
+  const finalBackupDir = backupDir || path.join(config.dataDir, "backups", `v2-schema-${stamp()}`);
+  const database = new DatabaseSync(dbPath);
+  try {
+    database.exec("pragma busy_timeout = 5000");
+    database.exec("pragma foreign_keys = off");
+    archiveV1(database, dbPath, finalBackupDir, plan);
+    const hasProcessed = tableExists(database, "hardcover_processed");
+    const hasDailyDownloads = tableExists(database, "hardcover_daily_downloads");
+    database.exec("begin immediate");
+    database.exec(`
+      create table accounts_new (
+        slug text primary key
+          check(length(slug) between 1 and 48
+            and slug not glob '*[^a-z0-9-]*'
+            and slug not like '-%'
+            and slug not like '%-'),
+        display_name text not null check(length(trim(display_name)) > 0),
+        email text,
+        status text not null default 'active' check(status in ('active', 'disabled')),
+        books_password text not null check(length(books_password) > 0),
+        hardcover_token text,
+        hardcover_user_id integer,
+        hardcover_username text,
+        created_at text not null,
+        updated_at text not null,
+        disabled_at text
+      );
+      insert into accounts_new(
+        slug, display_name, email, status, books_password,
+        hardcover_token, hardcover_user_id, hardcover_username,
+        created_at, updated_at, disabled_at
+      )
+      select
+        slug,
+        display_name,
+        email,
+        case when status='disabled' then 'disabled' else 'active' end,
+        login_password,
+        case when coalesce(hardcover_sync_enabled, 0)=1 then hardcover_token else null end,
+        case when coalesce(hardcover_sync_enabled, 0)=1 then hardcover_user_id else null end,
+        case when coalesce(hardcover_sync_enabled, 0)=1 then hardcover_username else null end,
+        created_at,
+        updated_at,
+        disabled_at
+      from accounts;
+      create unique index accounts_new_hardcover_user_id_uq
+        on accounts_new(hardcover_user_id)
+        where hardcover_user_id is not null;
+      create table hardcover_requests_new (
+        account_slug text not null references accounts(slug) on delete cascade,
+        hardcover_user_book_id integer not null,
+        hardcover_book_id integer,
+        title text not null,
+        author text,
+        status text not null check(status in ('downloading', 'fulfilled', 'error')),
+        selected_md5 text,
+        selected_title text,
+        selected_format text,
+        selected_language text,
+        download_path text,
+        imported_at text,
+        moved_at text,
+        error text,
+        created_at text not null,
+        updated_at text not null,
+        primary key(account_slug, hardcover_user_book_id)
+      );
+      create table hardcover_daily_downloads_new (
+        day text primary key,
+        download_count integer not null default 0 check(download_count >= 0),
+        updated_at text not null
+      );
+    `);
+    if (hasProcessed) {
+      database.exec(`
+        insert into hardcover_requests_new(
+          account_slug, hardcover_user_book_id, hardcover_book_id, title, author, status,
+          selected_md5, selected_title, selected_format, selected_language,
+          download_path, imported_at, moved_at, error, created_at, updated_at
+        )
+        select
+          user_slug, user_book_id, hardcover_book_id, title, author, status,
+          selected_md5, selected_title, selected_format, selected_language,
+          download_path, imported_at, moved_at, error, created_at, updated_at
+        from hardcover_processed;
+      `);
+    }
+    if (hasDailyDownloads) {
+      database.exec(`
+        insert into hardcover_daily_downloads_new(day, download_count, updated_at)
+        select day, count, updated_at from hardcover_daily_downloads;
+      `);
+    }
+    const migratedAccounts = Number(scalar(database, "select count(*) from accounts_new") || 0);
+    const migratedRequests = Number(scalar(database, "select count(*) from hardcover_requests_new") || 0);
+    const migratedDailyRows = Number(scalar(database, "select count(*) from hardcover_daily_downloads_new") || 0);
+    if (migratedAccounts !== plan.accountCount) throw new Error("Account row count changed during migration.");
+    if (migratedRequests !== plan.requestCount) throw new Error("Hardcover request row count changed during migration.");
+    if (migratedDailyRows !== plan.dailyCountRows) throw new Error("Daily download row count changed during migration.");
+    database.exec(`
+      drop table accounts;
+      drop table if exists hardcover_processed;
+      drop table if exists hardcover_daily_downloads;
+      drop table if exists audit_log;
+      alter table accounts_new rename to accounts;
+      alter table hardcover_requests_new rename to hardcover_requests;
+      alter table hardcover_daily_downloads_new rename to hardcover_daily_downloads;
+      create index hardcover_requests_status_idx on hardcover_requests(account_slug, status, updated_at);
+      pragma user_version = 2;
+      commit;
+    `);
+    database.exec("pragma foreign_keys = on");
+    database.exec("pragma wal_checkpoint(truncate)");
+    database.exec("vacuum");
+    const integrityResult = integrity(database);
+    if (integrityResult !== "ok") throw new Error(`Post-migration integrity check failed: ${integrityResult}`);
+    return { ...plan, backupDir: finalBackupDir, migrated: true };
+  } catch (error) {
+    try {
+      database.exec("rollback");
+    } catch {}
+    throw error;
+  } finally {
+    database.close();
+  }
 }
 
 function getAccount(slug) {
@@ -172,7 +368,6 @@ function activeAccountsWithHardcover() {
   return db().prepare(`
     select * from accounts
     where status='active'
-      and hardcover_sync_enabled=1
       and hardcover_token is not null
     order by slug
   `).all();
@@ -186,35 +381,20 @@ function firstActiveAccount() {
   return db().prepare("select * from accounts where status='active' order by slug limit 1").get();
 }
 
-function serviceUser(row) {
-  return row.login_user || row.slug;
-}
-
-function servicePassword(row) {
-  return row.login_password || row.opds_password;
-}
-
 function accountPayload(row) {
   return {
     slug: row.slug,
     display_name: row.display_name,
     email: row.email,
     status: row.status,
-    roles: row.roles,
     setup_url: `https://${config.publicHost}/setup/${row.slug}`,
-    login_user: serviceUser(row),
-    login_password: servicePassword(row),
+    books_username: row.slug,
+    books_password: row.books_password,
     readest_url: "https://web.readest.com/",
     opds_url: `https://${config.publicHost}/catalog`,
-    opds_user: serviceUser(row),
-    opds_password: servicePassword(row),
     kosync_url: `https://${config.publicHost}/kosync`,
-    kosync_user: serviceUser(row),
-    kosync_password: servicePassword(row),
-    setup_user: serviceUser(row),
-    setup_password: servicePassword(row),
     hardcover_username: row.hardcover_username,
-    hardcover_sync_enabled: Boolean(row.hardcover_sync_enabled && row.hardcover_token)
+    hardcover_sync_enabled: Boolean(row.hardcover_token)
   };
 }
 
@@ -233,103 +413,62 @@ function createAccount({ name, slug, email }) {
   if (database.prepare("select 1 from accounts where slug=?").get(finalSlug)) {
     throw new Error(`Account already exists: ${finalSlug}`);
   }
-  const sharedPassword = passphrase();
-  const roles = ["reader"];
   const timestamp = now();
   database.prepare(`
-    insert into accounts(
-      slug, display_name, email, status, roles,
-      login_user, login_password,
-      opds_user, opds_password,
-      kosync_user, kosync_password, kosync_userkey,
-      setup_user, setup_password, created_at, updated_at
-    ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `).run(
-    finalSlug,
-    name,
-    email || null,
-    "active",
-    roles.join(","),
-    finalSlug,
-    sharedPassword,
-    `opds_${finalSlug}`,
-    sharedPassword,
-    `sync_${finalSlug}`,
-    sharedPassword,
-    md5(sharedPassword),
-    `setup_${finalSlug}`,
-    sharedPassword,
-    timestamp,
-    timestamp
-  );
-  audit("create", finalSlug, { email, roles });
+    insert into accounts(slug, display_name, email, status, books_password, created_at, updated_at)
+    values(?,?,?,?,?,?,?)
+  `).run(finalSlug, name, email || null, "active", passphrase(), timestamp, timestamp);
   return getAccount(finalSlug);
 }
 
 function rotateLogin(slug) {
-  const sharedPassword = passphrase();
-  updateAccount(slug, {
-    login_password: sharedPassword,
-    opds_password: sharedPassword,
-    kosync_password: sharedPassword,
-    kosync_userkey: md5(sharedPassword),
-    setup_password: sharedPassword
-  });
-  audit("rotate", slug, { service: "login" });
+  updateAccount(slug, { books_password: passphrase() });
 }
 
 function disableAccount(slug) {
   const timestamp = now();
   updateAccount(slug, { status: "disabled", disabled_at: timestamp, updated_at: timestamp });
-  audit("disable", slug);
 }
 
 function purgeAccount(slug) {
   db().prepare("delete from accounts where slug=?").run(slug);
-  audit("purge", slug);
 }
 
 function setHardcoverToken(slug, token, profile) {
   updateAccount(slug, {
     hardcover_token: token,
     hardcover_user_id: profile.id,
-    hardcover_username: profile.username,
-    hardcover_sync_enabled: 1,
-    hardcover_updated_at: now()
+    hardcover_username: profile.username
   });
-  audit("hardcover_set_token", slug, { hardcover_user_id: profile.id, hardcover_username: profile.username });
 }
 
 function clearHardcoverToken(slug) {
   updateAccount(slug, {
     hardcover_token: null,
     hardcover_user_id: null,
-    hardcover_username: null,
-    hardcover_sync_enabled: 0,
-    hardcover_updated_at: now()
+    hardcover_username: null
   });
-  audit("hardcover_clear_token", slug);
 }
 
 function dailyCount() {
-  const row = db().prepare("select count from hardcover_daily_downloads where day=?").get(today());
-  return row ? Number(row.count) : 0;
+  const row = db().prepare("select download_count from hardcover_daily_downloads where day=?").get(today());
+  return row ? Number(row.download_count) : 0;
 }
 
 function incrementDaily() {
   db().prepare(`
-    insert into hardcover_daily_downloads(day, count, updated_at)
+    insert into hardcover_daily_downloads(day, download_count, updated_at)
     values(?, 1, ?)
-    on conflict(day) do update set count=count + 1, updated_at=excluded.updated_at
+    on conflict(day) do update set download_count=download_count + 1, updated_at=excluded.updated_at
   `).run(today(), now());
 }
 
-function processed(userSlug, userBookId) {
-  return db().prepare("select * from hardcover_processed where user_slug=? and user_book_id=?").get(userSlug, Number(userBookId));
+function hardcoverRequest(userSlug, userBookId) {
+  return db().prepare("select * from hardcover_requests where account_slug=? and hardcover_user_book_id=?").get(userSlug, Number(userBookId));
 }
 
-function saveProcessed(userSlug, userBook, values) {
-  const existing = processed(userSlug, userBook.id);
+function saveHardcoverRequest(userSlug, userBook, values) {
+  const existing = hardcoverRequest(userSlug, userBook.id);
   const row = {
     hardcover_book_id: userBook.book_id || values.hardcover_book_id || null,
     title: values.title,
@@ -347,10 +486,10 @@ function saveProcessed(userSlug, userBook, values) {
   };
   if (existing) {
     db().prepare(`
-      update hardcover_processed
+      update hardcover_requests
       set hardcover_book_id=?, title=?, author=?, status=?, selected_md5=?, selected_title=?,
           selected_format=?, selected_language=?, download_path=?, imported_at=?, moved_at=?, error=?, updated_at=?
-      where user_slug=? and user_book_id=?
+      where account_slug=? and hardcover_user_book_id=?
     `).run(
       row.hardcover_book_id, row.title, row.author, row.status, row.selected_md5, row.selected_title,
       row.selected_format, row.selected_language, row.download_path, row.imported_at, row.moved_at, row.error,
@@ -358,8 +497,8 @@ function saveProcessed(userSlug, userBook, values) {
     );
   } else {
     db().prepare(`
-      insert into hardcover_processed(
-        user_slug, user_book_id, hardcover_book_id, title, author, status,
+      insert into hardcover_requests(
+        account_slug, hardcover_user_book_id, hardcover_book_id, title, author, status,
         selected_md5, selected_title, selected_format, selected_language,
         download_path, imported_at, moved_at, error, created_at, updated_at
       ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -376,16 +515,15 @@ module.exports = {
   today,
   md5,
   passphrase,
-  randomPassword,
   db,
   migrate,
-  audit,
+  migrateV2,
+  migrationPlan,
+  closeForTests,
   getAccount,
   listAccounts,
   firstActiveAccount,
   activeAccountsWithHardcover,
-  serviceUser,
-  servicePassword,
   accountPayload,
   createAccount,
   updateAccount,
@@ -396,6 +534,6 @@ module.exports = {
   clearHardcoverToken,
   dailyCount,
   incrementDaily,
-  processed,
-  saveProcessed
+  hardcoverRequest,
+  saveHardcoverRequest
 };

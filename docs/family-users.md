@@ -12,7 +12,7 @@ Each user has:
 - display name
 - slug, such as `neil` or `alice`
 - optional email, for owner reference
-- status: active, disabled, or purged
+- status: active or disabled
 - Books username
 - Books passphrase
 - optional Hardcover token

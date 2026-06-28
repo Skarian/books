@@ -1,8 +1,6 @@
-const express = require("express");
+const http = require("http");
 const config = require("./config");
 const state = require("./state");
-
-const app = express();
 
 const css = `
 body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f7f5f1;color:#191815}
@@ -25,16 +23,30 @@ function esc(value) {
     .replace(/"/g, "&quot;");
 }
 
+function send(res, status, headers, body = "") {
+  res.writeHead(status, {
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+    ...headers
+  });
+  res.end(body);
+}
+
 function sendHtml(res, title, body, status = 200) {
-  res.status(status)
-    .set("Content-Type", "text/html; charset=utf-8")
-    .set("Cache-Control", "no-store")
-    .set("Referrer-Policy", "no-referrer")
-    .send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><style>${css}</style></head><body><main class="wrap">${body}</main></body></html>`);
+  send(
+    res,
+    status,
+    { "Content-Type": "text/html; charset=utf-8" },
+    `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><style>${css}</style></head><body><main class="wrap">${body}</main></body></html>`
+  );
+}
+
+function notFound(res) {
+  sendHtml(res, "Not found", '<section class="card"><h1>Not found</h1></section>', 404);
 }
 
 function parseBasicAuth(req) {
-  const header = req.get("authorization") || "";
+  const header = req.headers.authorization || "";
   if (!header.startsWith("Basic ")) return null;
   try {
     const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
@@ -46,43 +58,18 @@ function parseBasicAuth(req) {
   }
 }
 
-function requireSetupAuth(req, res) {
-  const row = state.getAccount(req.params.user);
-  if (row.status !== "active") throw new Error("Account is not active.");
-  const credentials = parseBasicAuth(req);
-  if (!credentials || credentials.username !== state.serviceUser(row) || credentials.password !== state.servicePassword(row)) {
-    res.status(401).set("WWW-Authenticate", 'Basic realm="Books setup"').end();
-    return null;
-  }
-  return row;
-}
-
-app.get("/healthz", (_req, res) => {
-  res.type("text/plain").send("ok\n");
-});
-
-app.get("/setup/:user", (req, res) => {
-  let row;
-  try {
-    row = requireSetupAuth(req, res);
-  } catch {
-    sendHtml(res, "Not found", '<section class="card"><h1>Not found</h1></section>', 404);
-    return;
-  }
-  if (!row) return;
-  const user = state.serviceUser(row);
-  const password = state.servicePassword(row);
-  const hardcover = row.hardcover_sync_enabled && row.hardcover_username
+function setupPage(row) {
+  const hardcover = row.hardcover_token && row.hardcover_username
     ? `<p>Book requests use Hardcover. Add a book to Want to Read in Hardcover account <span class="code">${esc(row.hardcover_username)}</span>; the server checks every five minutes.</p>`
     : "<p>Book requests use Hardcover. Ask Neil to connect your Hardcover account before using Want to Read as your request list.</p>";
-  sendHtml(res, `Setup ${row.display_name}`, `
+  return `
     <div class="top"><div class="brand">Neil's Books for ${esc(row.display_name)}</div><div class="muted">shared books, private reading place</div></div>
     <section class="hero">
       <h1>Start here</h1>
       <p>Use this one Books login for the catalog and reading-position sync. Readest still has its own account.</p>
       <div class="grid">
-        <div class="field"><b>Username</b><span>${esc(user)}</span></div>
-        <div class="field"><b>Password</b><span>${esc(password)}</span></div>
+        <div class="field"><b>Username</b><span>${esc(row.slug)}</span></div>
+        <div class="field"><b>Password</b><span>${esc(row.books_password)}</span></div>
       </div>
       <a class="button" href="https://web.readest.com/">Open Readest</a>
     </section>
@@ -112,13 +99,51 @@ app.get("/setup/:user", (req, res) => {
       <h2>Test sync once</h2>
       <p>Open <b>Books Sync Fixture</b> from the catalog on two devices. Move to Sync marker three on one device, sync, then pull progress on the other device.</p>
     </section>
-  `);
-});
+  `;
+}
 
-app.use((_req, res) => {
-  sendHtml(res, "Not found", '<section class="card"><h1>Not found</h1></section>', 404);
-});
+function handleSetup(req, res, slug) {
+  let row;
+  try {
+    row = state.getAccount(slug);
+  } catch {
+    notFound(res);
+    return;
+  }
+  if (row.status !== "active") {
+    notFound(res);
+    return;
+  }
+  const credentials = parseBasicAuth(req);
+  if (!credentials || credentials.username !== row.slug || credentials.password !== row.books_password) {
+    send(res, 401, { "WWW-Authenticate": 'Basic realm="Books setup"' });
+    return;
+  }
+  sendHtml(res, `Setup ${row.display_name}`, setupPage(row));
+}
 
-app.listen(config.nodePort, "127.0.0.1", () => {
-  console.log(`books-node listening on 127.0.0.1:${config.nodePort}`);
-});
+function handler(req, res) {
+  const url = new URL(req.url, "http://127.0.0.1");
+  if (req.method === "GET" && url.pathname === "/healthz") {
+    send(res, 200, { "Content-Type": "text/plain; charset=utf-8" }, "ok\n");
+    return;
+  }
+  const match = /^\/setup\/([a-z0-9-]+)$/.exec(url.pathname);
+  if (req.method === "GET" && match) {
+    handleSetup(req, res, match[1]);
+    return;
+  }
+  notFound(res);
+}
+
+function createServer() {
+  return http.createServer(handler);
+}
+
+if (require.main === module) {
+  createServer().listen(config.nodePort, "127.0.0.1", () => {
+    console.log(`books-node listening on 127.0.0.1:${config.nodePort}`);
+  });
+}
+
+module.exports = { createServer, handler };

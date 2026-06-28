@@ -148,7 +148,7 @@ async function syncUser(row, options = {}) {
     const title = (book.title || "").trim();
     const author = authors(book);
     if (!title) continue;
-    const existing = state.processed(row.slug, userBook.id);
+    const existing = state.hardcoverRequest(row.slug, userBook.id);
     if (existing && existing.status === "fulfilled") continue;
     if (config.hardcoverDailyDownloadCap > 0 && state.dailyCount() >= config.hardcoverDailyDownloadCap) {
       console.log(`Daily Anna download cap reached: ${state.dailyCount()}/${config.hardcoverDailyDownloadCap}`);
@@ -162,7 +162,7 @@ async function syncUser(row, options = {}) {
       continue;
     }
     try {
-      state.saveProcessed(row.slug, userBook, {
+      state.saveHardcoverRequest(row.slug, userBook, {
         title,
         author,
         status: "downloading",
@@ -175,7 +175,7 @@ async function syncUser(row, options = {}) {
       const { downloadPath, downloaded } = downloadAndImport(candidate, filename);
       if (downloaded) state.incrementDaily();
       await moveToCurrentlyReading(row.hardcover_token, userBook.id);
-      state.saveProcessed(row.slug, userBook, {
+      state.saveHardcoverRequest(row.slug, userBook, {
         title,
         author,
         status: "fulfilled",
@@ -190,7 +190,7 @@ async function syncUser(row, options = {}) {
       console.log(`fulfilled: ${title}`);
       processedCount += 1;
     } catch (error) {
-      state.saveProcessed(row.slug, userBook, { title, author, status: "error", error: error.message });
+      state.saveHardcoverRequest(row.slug, userBook, { title, author, status: "error", error: error.message });
       console.error(`error: ${title}: ${error.message}`);
       processedCount += 1;
     }

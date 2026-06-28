@@ -26,7 +26,7 @@ Create the test EPUB:
 
 | Fixture | Source | Raw SHA256 | KOReader partial MD5 | Notes |
 |---|---|---|---|---|
-| Books Sync Fixture | repo-generated |  |  |  |
+| Books Sync Fixture | repo fixture |  |  |  |
 
 ## Server Versions
 

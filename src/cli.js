@@ -36,8 +36,8 @@ function printAccount(row, json = false) {
   console.log(`Setup: ${payload.setup_url}`);
   console.log();
   console.log("Use this login for setup, the book catalog, and reading sync:");
-  console.log(`Username: ${payload.login_user}`);
-  console.log(`Password: ${payload.login_password}`);
+  console.log(`Username: ${payload.books_username}`);
+  console.log(`Password: ${payload.books_password}`);
   console.log();
   console.log(`Readest: ${payload.readest_url}`);
   console.log("Readest account: create or sign in with your own Readest account.");
@@ -72,6 +72,52 @@ function requireArg(value, message) {
   return value;
 }
 
+function printMigrationPlan(plan) {
+  if (plan.alreadyV2) {
+    console.log(`Already on v2 schema (${plan.dbPath}).`);
+    return;
+  }
+  console.log(`v2 migration preflight for ${plan.dbPath}`);
+  console.log(`Accounts: ${plan.accountCount}`);
+  console.log(`Hardcover requests: ${plan.requestCount}`);
+  console.log(`Daily download rows: ${plan.dailyCountRows}`);
+  console.log(`Archived audit rows: ${plan.auditRows}`);
+  for (const row of plan.legacyAccounts) {
+    const legacy = [row.opds_user, row.kosync_user, row.setup_user].filter(Boolean).join(", ");
+    console.log(`Legacy names for ${row.slug}: ${legacy || "-"}`);
+  }
+}
+
+function migrateV2(args) {
+  let execute = false;
+  let backupDir;
+  while (args.length) {
+    const arg = args.shift();
+    if (arg === "--execute") execute = true;
+    else if (arg === "--backup-dir") backupDir = requireArg(args.shift(), "Missing --backup-dir value.");
+    else throw new Error(`Unknown users migrate-v2 option: ${arg}`);
+  }
+  const plan = state.migrationPlan();
+  printMigrationPlan(plan);
+  if (plan.alreadyV2 || !execute) {
+    if (!plan.alreadyV2) console.log("Dry run only. Re-run with --execute to migrate.");
+    return;
+  }
+  for (const row of plan.legacyAccounts) {
+    if (row.opds_user && row.opds_user !== row.slug) {
+      system.calibreRemoveUser(row.opds_user);
+      console.log(`Removed legacy Calibre user ${row.opds_user}.`);
+    }
+    if (row.kosync_user && row.kosync_user !== row.slug) {
+      const stats = system.mergeKosyncUser(row.kosync_user, row.slug);
+      console.log(`Merged KOSync ${row.kosync_user} -> ${row.slug}: ${stats.copied} copied, ${stats.skipped} kept, ${stats.deleted} deleted.`);
+    }
+  }
+  const result = state.migrateV2({ execute: true, backupDir });
+  console.log(`Migrated ${result.accountCount} account(s) to v2.`);
+  console.log(`Backup: ${result.backupDir}`);
+}
+
 async function users(args) {
   const command = args.shift();
   if (command === "init") {
@@ -79,8 +125,10 @@ async function users(args) {
     console.log(`Initialized ${config.accountsDb}`);
   } else if (command === "list") {
     for (const row of state.listAccounts()) {
-      console.log(`${row.slug}\t${row.status}\t${row.display_name}\t${row.email || ""}\t${row.roles}`);
+      console.log(`${row.slug}\t${row.status}\t${row.display_name}\t${row.email || ""}`);
     }
+  } else if (command === "migrate-v2") {
+    migrateV2(args);
   } else if (command === "create") {
     const name = requireArg(args.shift(), "Missing name.");
     let slug;
@@ -112,10 +160,8 @@ async function users(args) {
     const user = requireArg(args.shift(), "Missing user.");
     if (!args.includes("--yes")) throw new Error("Refusing to purge without --yes.");
     const row = state.getAccount(user);
-    system.kosyncPurgeUser(row.kosync_user);
-    system.kosyncPurgeUser(state.serviceUser(row));
-    system.calibreRemoveUser(row.opds_user);
-    system.calibreRemoveUser(state.serviceUser(row));
+    system.kosyncPurgeUser(row.slug);
+    system.calibreRemoveUser(row.slug);
     state.purgeAccount(user);
   } else if (command === "reconcile") {
     const user = args.shift();
@@ -148,7 +194,7 @@ async function hardcoverCommand(args) {
     const user = args.shift();
     const rows = user ? [state.getAccount(user)] : state.listAccounts();
     for (const row of rows) {
-      const enabled = row.hardcover_sync_enabled && row.hardcover_token ? "enabled" : "disabled";
+      const enabled = row.hardcover_token ? "enabled" : "disabled";
       console.log(`${row.slug}\t${enabled}\t${row.hardcover_username || "-"}`);
     }
     console.log(`daily_downloads\t${state.dailyCount()}/${config.hardcoverDailyDownloadCap}\t${state.today()}`);
