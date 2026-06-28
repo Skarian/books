@@ -28,12 +28,10 @@ The proxy container listens on `BOOKS_PROXY_PORT`.
 
 - `/catalog`, `/opds`, and `/get/...` go to Calibre.
 - `/kosync` goes to KOSync with the prefix stripped.
-- `/kosync/users/create` is blocked publicly.
 - `/library` redirects to `https://web.readest.com/`.
 - `/healthz` is served by nginx.
-- `/` returns 404.
 
-The VM may not be able to call its own public HTTPS endpoint. Use local checks:
+Use local checks from inside the VM:
 
 ```bash
 docker compose run --rm admin health
@@ -49,7 +47,7 @@ ssh exe.dev share set-private books
 ```
 
 For homelab deployment, set `BOOKS_PUBLIC_HOST` and point your normal reverse
-proxy at `127.0.0.1:8000` unless you deliberately change `BOOKS_BIND_ADDR`.
+proxy at `127.0.0.1:8000`.
 
 ## Users
 
@@ -101,8 +99,8 @@ The fixture command imports `Books Sync Fixture` into Calibre.
 The installed binary is `/opt/books/bin/annas-mcp` inside the runtime image.
 Hardcover intake uses it internally.
 
-Respect copyright and terms. Ask before downloading when authorization is not
-clear.
+Respect copyright and terms. Ask before downloading when authorization is
+unclear.
 
 ## Hardcover intake
 

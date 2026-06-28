@@ -1,14 +1,13 @@
 # Device setup
 
 Books come from the shared OPDS catalog. Reading position syncs through KOSync.
-Readest itself is not hosted on this VM; use the official apps or
-`https://web.readest.com/`.
+Use the official Readest apps or `https://web.readest.com/`.
 
-Do not copy random EPUB files between devices if progress matters. Use the OPDS
-download so every app starts from the same canonical file.
+Download each book from OPDS on every device so each app starts from the same
+canonical file.
 
-KOSync is the progress authority. Do not configure Readest WebDAV for this
-library. It is a separate sync lane and this repo does not run it.
+KOSync is the progress authority. Book downloads use OPDS; reading position uses
+KOSync.
 
 ## Credentials
 
@@ -65,17 +64,14 @@ platform, but the two things to find are OPDS catalogs and KOReader Sync.
 11. Set Checksum Method to File Content.
 12. Repeat this on each Readest device.
 
-Do not enter `/api`, `/v1`, or `/healthcheck` after the KOSync URL. The URL is
-exactly `https://books.example.com/kosync`.
+The KOSync URL is exactly `https://books.example.com/kosync`.
 
-Readest's account sync is convenient when it works, but this repo does not
-depend on it. Catalog URLs may sync across devices. Catalog and KOSync passwords
-only sync if the reader turns on Readest's optional Credentials sync and enters
-the same sync passphrase on each device. If a device does not show the catalog
-or KOSync settings, enter the Books login again from the owner handoff.
+Readest account sync may copy catalog URLs across devices. Password sync uses
+Readest's optional Credentials sync and the same sync passphrase on each device.
+Enter the Books login again on any device that needs the catalog or KOSync
+settings.
 
-Do not turn on Readest WebDAV. It is not needed for book downloads or progress
-sync, and it can introduce a second progress path.
+For this library, use OPDS for books and KOSync for progress.
 
 After setup, test with `Books Sync Fixture`. The owner can add it with:
 
@@ -104,11 +100,8 @@ tests when possible.
 
 ## Kobo
 
-The core repo does not depend on stock Kobo sync.
-
 For Kobo, use KOReader when shared progress matters. Stock Kobo can be tested
-later with copied-library sidecars, but it is not allowed to block the core
-CrossPoint, Readest, and KOReader setup.
+later with copied-library sidecars.
 
 ## Progress problems
 
@@ -118,14 +111,13 @@ If a book opens in the wrong place on another device, check these first:
 - Readest uses file-content matching.
 - KOReader uses binary matching.
 - Each person uses their own Books login.
-- KOSync only syncs reading position, not notes, highlights, bookmarks, or the
-  book file.
+- KOSync syncs reading position only. Notes, highlights, bookmarks, and book
+  files stay in the reader app.
 - Official KOSync is last-write-wins, so a stale device can move progress
   backward if it syncs later.
-- The Calibre EPUB was not re-converted, metadata-written, optimized, or re-zipped
-  after import.
-- The test is running from a real external device. The VM may not be able to
-  call its own public HTTPS endpoint.
+- The Calibre EPUB has the same file content as the version downloaded by the
+  other devices.
+- Public route tests run from a real external device.
 
 If two people see each other's reading position, they are sharing a Books login.
 Issue separate accounts and stop using the shared login.

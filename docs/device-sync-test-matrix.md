@@ -13,7 +13,7 @@ The setup passes when CrossPoint, KOReader, and Readest can download the same
 EPUB from `/catalog` and push/pull progress through `/kosync` with one Books
 login per reader.
 
-Kobo is optional. WebDAV is not part of the default build.
+Kobo is optional. The default sync path is OPDS plus KOSync.
 
 ## Fixture
 
@@ -51,7 +51,7 @@ docker compose run --rm admin verify USER
 
 ## OPDS Download
 
-Pass only if the device downloads from:
+Pass condition: the device downloads from:
 
 ```text
 https://books.example.com/catalog
@@ -75,7 +75,7 @@ The client base URL is exactly:
 https://books.example.com/kosync
 ```
 
-Do not append `/api`, `/v1`, or `/healthcheck`.
+Use the base URL exactly as shown.
 
 | Client | Server URL accepted | Books login accepted | Matching setting | Notes |
 |---|---|---|---|---|
@@ -92,9 +92,8 @@ Do not append `/api`, `/v1`, or `/healthcheck`.
 Landing precision choices: same paragraph, same page, within 1-3 pages, chapter
 start, wrong, failed.
 
-Only reading position is expected to sync through KOSync. Do not treat missing
-bookmarks, notes, highlights, ratings, or collections as failures in this
-matrix.
+KOSync covers reading position. Bookmarks, notes, highlights, ratings, and
+collections stay in the reader app.
 
 | From | To | Push works | Pull works | Landing precision | Notes |
 |---|---|---|---|---|---|
@@ -125,14 +124,14 @@ Use the same fixture with two different Books users.
 | Test | Expected | Pass | Notes |
 |---|---|---|---|
 | Create user | One Books login is created |  |  |
-| Reconcile users | Calibre and KOSync users are rebuilt without rotating passwords |  |  |
+| Reconcile users | Calibre and KOSync users are rebuilt while Books passwords stay the same |  |  |
 | Show user | Owner can recover the one Books login |  |  |
-| Public KOSync registration | `/kosync/users/create` returns 404 |  |  |
-| Setup website absent | `/setup/USER` returns 404 |  |  |
+| KOSync account creation | Owner CLI creates the KOSync account |  |  |
+| Reader handoff | `users show USER` prints catalog and KOSync setup values |  |  |
 
 ## Failure Checks
 
-If progress does not move:
+If progress stays put:
 
 - Confirm both devices downloaded `Books Sync Fixture` from `/catalog`.
 - Confirm both devices use the same Books login for that test.

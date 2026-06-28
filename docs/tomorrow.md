@@ -1,7 +1,6 @@
 # Historical Notes
 
 These notes record the research direction that led to the current repo shape.
-They are not the implementation contract.
 
 - Keep Calibre as the canonical book store.
 - Use official Readest Web at `https://web.readest.com/` and Readest apps on
@@ -12,5 +11,4 @@ They are not the implementation contract.
 - Use KOReader anywhere it is the better device app.
 - Treat stock Kobo as optional.
 - Use `docker compose run --rm admin users ...` as the owner workflow for now.
-- Preserve reproducibility: installs and config belong in repo files, not manual
-  VM state.
+- Preserve reproducibility: installs and config belong in repo files.

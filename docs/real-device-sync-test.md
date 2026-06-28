@@ -1,9 +1,8 @@
 # Real-device sync test
 
 Use this when the server is healthy and you are ready to test actual devices.
-The VM can prove OPDS auth and KOSync progress writes locally, but it cannot
-prove that CrossPoint, Readest apps, and KOReader land in the right place on
-physical devices.
+The VM can prove OPDS auth and KOSync progress writes locally. Real devices show
+whether CrossPoint, Readest apps, and KOReader land in the right place.
 
 ## 1. Add the test book
 
@@ -29,8 +28,8 @@ For Readest:
 
 1. Sign in to your Readest account.
 2. Add the OPDS catalog from Import Menu, then Online Library.
-3. Download `Books Sync Fixture` from the catalog. If it is not visible right
-   away, search for that exact title.
+3. Download `Books Sync Fixture` from the catalog. If it is hard to find, search
+   for that exact title.
 4. Open the fixture.
 5. Open Book Menu, then KOReader Sync.
 6. Set the server to `https://books.example.com/kosync`.
@@ -74,7 +73,7 @@ Fail:
 
 - It opens at the beginning.
 - It opens a different book.
-- It asks for credentials again and cannot connect.
+- It asks for credentials again or fails to connect.
 - It syncs to someone else's place.
 
 ## 5. Record the result

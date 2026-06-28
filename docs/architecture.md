@@ -11,8 +11,7 @@ The design is plain:
 - The Node CLI owns setup, imports, account reconciliation, and intake commands.
 - Hardcover Want to Read is the automatic intake list.
 
-No local web reader, dashboard, or Calibre-Web instance is part of the default
-build.
+Readers use hosted Readest, OPDS-capable apps, KOReader, or CrossPoint.
 
 ## Containers
 
@@ -37,15 +36,12 @@ https://books.example.com
   /kosync        -> KOReader Sync Server, prefix stripped by nginx
   /library       -> redirect to https://web.readest.com/
   /healthz       -> nginx health
-  /              -> 404
 ```
 
-Reader routes must work without an exe.dev browser session. OPDS uses Calibre
-Basic auth. KOSync uses KOSync auth. There is no reader dashboard or setup
-website.
+Reader routes work directly from reading apps. OPDS uses Calibre Basic auth.
+KOSync uses KOSync auth.
 
-Do not configure clients with `/api`, `/v1`, or `/healthcheck` appended to the
-KOSync URL. The client base URL is exactly:
+The KOSync client base URL is:
 
 ```text
 https://books.example.com/kosync
@@ -54,9 +50,8 @@ https://books.example.com/kosync
 Nginx strips `/kosync` before proxying. For example,
 `/kosync/users/auth` reaches upstream `/users/auth`.
 
-Public `/kosync/users/create` is blocked. The KOSync container keeps
-registration enabled internally so `docker compose run --rm admin users create`
-can create the matching sync account.
+`docker compose run --rm admin users create` creates the matching KOSync account
+inside the Compose network.
 
 ## Accounts
 
@@ -78,22 +73,23 @@ send to the reader. The same JSON file stores Hardcover tokens and the VM-wide
 daily download count. Secrets stay out of git.
 
 `docker compose run --rm admin users reconcile` pushes account state into
-Calibre and KOSync. It does not change existing Books passwords.
+Calibre and KOSync while keeping existing Books passwords.
 
 ## Progress
 
 KOSync is the progress authority. Readest, KOReader, and CrossPoint should all
 use KOSync when the app supports it.
 
-KOSync is progress-only. It does not sync highlights, notes, bookmarks, ratings,
-collections, or the book files themselves. The book file comes from OPDS.
+KOSync syncs reading position only. Highlights, notes, bookmarks, ratings,
+collections, and book files stay in the reader app. The book file comes from
+OPDS.
 
 Progress identity depends on the reader app's KOReader-compatible file content
 hash. The practical rule is simple: download the same EPUB from `/catalog` on
 each device.
 
-KOSync is last-write-wins. One stale device can move progress backward, so family
-members must not share a Books login.
+KOSync is last-write-wins. Give family members separate Books logins so their
+progress stays separate.
 
 ## Hardcover intake
 
@@ -106,7 +102,7 @@ For each configured user, the worker runs every five minutes:
 5. Increment the VM-wide daily download count.
 
 The automatic intake cap defaults to 10 downloaded files per UTC day for the
-whole VM. It is not per user.
+whole VM.
 
 ## Runtime state
 
@@ -137,5 +133,5 @@ Restore flow:
 8. Run `docker compose run --rm admin health`.
 9. Run `docker compose run --rm admin verify USER`.
 
-No required restore step should live only in shell history or a manual edit under
-`/etc`.
+Every required restore step is captured in the repo or the restored data
+directory.

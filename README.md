@@ -18,8 +18,6 @@ The active deployment is Docker Compose:
 - `worker`: Hardcover intake loop, every five minutes by default.
 - `admin`: one-shot CLI container for owner commands.
 
-There is no Calibre-Web service and no local reader UI. Compose is the app stack.
-
 Public routes:
 
 - `/catalog`: OPDS catalog for Readest, CrossPoint, KOReader, and other readers.
@@ -29,12 +27,11 @@ Public routes:
 - `/library`: redirect to hosted Readest Web.
 - `/healthz`: simple nginx health check.
 
-Everything else returns 404. Public KOSync account creation is blocked; user
-creation goes through the owner CLI.
+User creation goes through the owner CLI.
 
 ## Runtime state
 
-These paths are created by `bootstrap` and are not committed:
+`bootstrap` creates these runtime paths:
 
 - `.env`: operator config and API keys.
 - `data/config/secrets.json`: generated internal Calibre admin secret.
@@ -65,14 +62,13 @@ docker compose run --rm admin users create "Alice" --email alice@example.com
 docker compose run --rm admin verify alice
 ```
 
-Install Docker and Docker Compose before running the stack. This repo uses the
-standard Compose flow instead of a custom VM installer. Keep `.env` private; it
-can hold API keys.
+Install Docker and Docker Compose before running the stack. Keep `.env` private;
+it can hold API keys.
 
 ## Deployment address
 
-The public host is not hardcoded. Set `BOOKS_PUBLIC_HOST` in `.env` to the host
-readers will use. The examples use `books.example.com`.
+Set `BOOKS_PUBLIC_HOST` in `.env` to the host readers will use. The examples use
+`books.example.com`.
 
 For exe.dev, expose the loopback proxy from your local machine:
 
@@ -87,8 +83,12 @@ Return to private mode:
 ssh exe.dev share set-private books
 ```
 
-The VM may not be able to call its own public HTTPS endpoint. Local checks use
-the internal Compose proxy.
+Use the internal Compose proxy for local checks:
+
+```bash
+docker compose run --rm admin health
+docker compose run --rm admin verify alice
+```
 
 For a homelab, keep `BOOKS_BIND_ADDR=127.0.0.1` and point your normal reverse
 proxy at `127.0.0.1:8000`, or change the bind address deliberately.
@@ -153,9 +153,9 @@ Then send them the values and `docs/reader-setup.md`. They need:
 - KOSync URL: `https://books.example.com/kosync`.
 - The same Books username and password for both integrations.
 
-Readest account sync is not part of the backend contract. Catalog URLs may sync
-through Readest, but credentials are opt-in and require a Readest sync
-passphrase. Set up OPDS and KOSync on each device when in doubt.
+Readest may sync catalog URLs across devices. Credentials sync in Readest is
+opt-in and requires a Readest sync passphrase. Set up OPDS and KOSync on each
+device when in doubt.
 
 ## Docs
 
@@ -166,8 +166,7 @@ passphrase. Set up OPDS and KOSync on each device when in doubt.
 - `docs/family-users.md`: user lifecycle and per-user credentials.
 - `docs/device-sync-test-matrix.md`: device test checklist.
 
-Research notes live under `docs/research/`. They are history, not the current
-implementation contract.
+Research notes live under `docs/research/`.
 
 ## References
 
