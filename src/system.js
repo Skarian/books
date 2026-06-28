@@ -1,4 +1,5 @@
 const fs = require("fs");
+const crypto = require("crypto");
 const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
@@ -21,6 +22,24 @@ function run(command, args = [], options = {}) {
 
 function ensureDir(dir, mode = 0o750) {
   fs.mkdirSync(dir, { recursive: true, mode });
+}
+
+function secrets(create = false) {
+  let data = {};
+  if (fs.existsSync(config.secretsFile)) {
+    data = JSON.parse(fs.readFileSync(config.secretsFile, "utf8"));
+  } else if (!create) {
+    throw new Error("Run `docker compose run --rm admin bootstrap` before this command.");
+  }
+  if (!data.calibre_admin_password && create) {
+    data.calibre_admin_password = crypto.randomBytes(24).toString("base64url");
+    fs.writeFileSync(config.secretsFile, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
+  }
+  return data;
+}
+
+function calibreAdminPassword(create = false) {
+  return secrets(create).calibre_admin_password;
 }
 
 function calibreUsers() {
@@ -85,7 +104,7 @@ async function reconcile(slug) {
 }
 
 function annas(args, options = {}) {
-  if (!config.annasSecretKey) throw new Error(`ANNAS_SECRET_KEY is not configured in ${config.ENV_FILE}.`);
+  if (!config.annasSecretKey) throw new Error("ANNAS_SECRET_KEY is not configured in .env.");
   ensureDir(config.annasDownloadPath, 0o770);
   const env = {
     ...process.env,
@@ -100,7 +119,7 @@ function importFiles(files) {
   ensureDir(config.libraryDir, 0o770);
   const passwordDir = fs.mkdtempSync(path.join(os.tmpdir(), "books-calibre-"));
   const passwordFile = path.join(passwordDir, "password");
-  fs.writeFileSync(passwordFile, config.calibreAdminPassword, { mode: 0o600 });
+  fs.writeFileSync(passwordFile, calibreAdminPassword(), { mode: 0o600 });
   const libraryUrl = `${config.calibreUrl}/#${config.calibreLibraryId}`;
   try {
     for (const input of files) {
@@ -123,21 +142,13 @@ function importFiles(files) {
   }
 }
 
-function writeSyncFixture(output) {
-  const fixture = path.join(__dirname, "..", "fixtures", "books-sync-fixture.epub");
-  if (!fs.existsSync(fixture)) throw new Error(`Missing fixture: ${fixture}`);
-  fs.mkdirSync(path.dirname(output), { recursive: true });
-  fs.copyFileSync(fixture, output);
-}
-
 function bootstrap() {
-  ensureDir(config.configDir, 0o750);
-  ensureDir(config.libraryDir, 0o770);
-  ensureDir(config.downloadDir, 0o770);
-  ensureDir(config.importDir, 0o770);
-  ensureDir(config.logDir, 0o750);
-  if (!config.calibreAdminPassword) throw new Error("CALIBRE_ADMIN_PASSWORD is not configured.");
-  calibreSetUser(config.calibreAdminUser, config.calibreAdminPassword, false);
+  for (const dir of [
+    config.configDir, config.libraryDir, config.downloadDir, config.importDir,
+    config.logDir, path.join(config.dataDir, "kosync", "redis"),
+    path.join(config.logDir, "kosync", "redis"), path.join(config.logDir, "kosync", "app")
+  ]) ensureDir(dir, dir === config.configDir || dir === config.logDir ? 0o750 : 0o770);
+  calibreSetUser(config.calibreAdminUser, calibreAdminPassword(true), false);
   run("calibredb", ["--with-library", config.libraryDir, "list"], { check: false });
 }
 
@@ -150,7 +161,7 @@ async function fetchOk(url, options = {}) {
 async function health() {
   const row = state.firstActiveAccount();
   const user = row ? row.slug : config.calibreAdminUser;
-  const password = row ? row.books_password : config.calibreAdminPassword;
+  const password = row ? row.books_password : calibreAdminPassword();
   const auth = Buffer.from(`${user}:${password}`).toString("base64");
   await fetchOk(`${config.localBaseUrl}/healthz`);
   await fetchOk(`${config.localBaseUrl}/opds`, { headers: { Authorization: `Basic ${auth}` } });
@@ -160,7 +171,7 @@ async function health() {
 
 async function verify(slug) {
   const row = slug ? state.getAccount(slug) : state.firstActiveAccount();
-  if (!row) throw new Error('No active user exists. Create one with ./scripts/books users create "Name" --email person@example.com');
+  if (!row) throw new Error('No active user exists. Create one with `docker compose run --rm admin users create "Name" --email person@example.com`.');
   const basic = Buffer.from(`${row.slug}:${row.books_password}`).toString("base64");
   await fetchOk(`${config.localBaseUrl}/healthz`);
   const root = await fetch(`${config.localBaseUrl}/`);
@@ -201,7 +212,6 @@ module.exports = {
   reconcile,
   annas,
   importFiles,
-  writeSyncFixture,
   health,
   verify
 };

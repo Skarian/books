@@ -38,8 +38,7 @@ COPY package*.json ./
 RUN npm install --omit=dev
 
 COPY . .
-RUN chmod +x /app/scripts/books /app/scripts/onboard /app/src/cli.js /app/docker/books/entrypoint.sh
+RUN chmod +x /app/src/cli.js /app/docker/books/entrypoint.sh
 
-ENV BOOKS_ENV_FILE=/etc/books/books.env
 ENTRYPOINT ["/app/docker/books/entrypoint.sh"]
 CMD ["node", "src/server.js"]

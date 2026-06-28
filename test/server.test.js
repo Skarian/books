@@ -12,10 +12,7 @@ function resetModules() {
 
 function loadApp(dir) {
   resetModules();
-  process.env.BOOKS_ENV_FILE = path.join(dir, "missing.env");
   process.env.BOOKS_DATA_DIR = dir;
-  process.env.BOOKS_CONFIG_DIR = dir;
-  process.env.BOOKS_STATE_FILE = path.join(dir, "state.json");
   process.env.BOOKS_PUBLIC_HOST = "books.test";
   const state = require("../src/state");
   state.createAccount({ name: "Neil", slug: "neil", email: "neil@example.com" });

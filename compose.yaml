@@ -15,15 +15,12 @@ services:
     build:
       context: .
       dockerfile: docker/books/Dockerfile
-      args:
-        CALIBRE_VERSION: "${CALIBRE_VERSION:-9.9.0}"
-        ANNAS_VERSION: "${ANNAS_VERSION:-v0.0.5}"
     image: books-runtime
     env_file:
-      - ${BOOKS_ENV_FILE:-/etc/books/books.env}
+      - .env
     command: ["node", "src/server.js"]
     volumes:
-      - ${BOOKS_HOST_DATA_DIR:-/srv/books}:/srv/books
+      - ${BOOKS_HOST_DATA_DIR:-./data}:/srv/books
     expose:
       - "8090"
     restart: unless-stopped
@@ -31,7 +28,7 @@ services:
   calibre:
     image: books-runtime
     env_file:
-      - ${BOOKS_ENV_FILE:-/etc/books/books.env}
+      - .env
     command:
       - calibre-server
       - --listen-on
@@ -56,19 +53,19 @@ services:
       - "100"
       - /srv/books/library
     volumes:
-      - ${BOOKS_HOST_DATA_DIR:-/srv/books}:/srv/books
+      - ${BOOKS_HOST_DATA_DIR:-./data}:/srv/books
     expose:
       - "8080"
     restart: unless-stopped
 
   kosync:
-    image: "${KOSYNC_IMAGE:-koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1}"
+    image: koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1
     environment:
-      ENABLE_USER_REGISTRATION: "${KOSYNC_ENABLE_REGISTRATION:-true}"
+      ENABLE_USER_REGISTRATION: "true"
     volumes:
-      - ${BOOKS_HOST_DATA_DIR:-/srv/books}/kosync/redis:/var/lib/redis
-      - ${BOOKS_HOST_DATA_DIR:-/srv/books}/log/kosync/redis:/var/log/redis
-      - ${BOOKS_HOST_DATA_DIR:-/srv/books}/log/kosync/app:/app/koreader-sync-server/logs
+      - ${BOOKS_HOST_DATA_DIR:-./data}/kosync/redis:/var/lib/redis
+      - ${BOOKS_HOST_DATA_DIR:-./data}/log/kosync/redis:/var/log/redis
+      - ${BOOKS_HOST_DATA_DIR:-./data}/log/kosync/app:/app/koreader-sync-server/logs
     expose:
       - "17200"
       - "7200"
@@ -77,10 +74,10 @@ services:
   worker:
     image: books-runtime
     env_file:
-      - ${BOOKS_ENV_FILE:-/etc/books/books.env}
-    command: ["sh", "-lc", "while true; do node src/cli.js hardcover sync; sleep \"$${HARDCOVER_SYNC_INTERVAL_SECONDS:-300}\"; done"]
+      - .env
+    command: ["sh", "-lc", "while true; do node src/cli.js hardcover sync; sleep 300; done"]
     volumes:
-      - ${BOOKS_HOST_DATA_DIR:-/srv/books}:/srv/books
+      - ${BOOKS_HOST_DATA_DIR:-./data}:/srv/books
     depends_on:
       - app
       - calibre
@@ -91,11 +88,8 @@ services:
     image: books-runtime
     profiles: ["admin"]
     env_file:
-      - ${BOOKS_ENV_FILE:-/etc/books/books.env}
+      - .env
     volumes:
-      - ${BOOKS_HOST_DATA_DIR:-/srv/books}:/srv/books
-    depends_on:
-      - app
-      - calibre
-      - kosync
-    entrypoint: ["/app/docker/books/entrypoint.sh"]
+      - ${BOOKS_HOST_DATA_DIR:-./data}:/srv/books
+    entrypoint: ["/app/docker/books/entrypoint.sh", "/app/src/cli.js"]
+    command: ["--help"]

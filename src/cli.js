@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 const fs = require("fs");
-const path = require("path");
 const readline = require("node:readline/promises");
 const config = require("./config");
 const state = require("./state");
@@ -8,19 +7,15 @@ const system = require("./system");
 const hardcover = require("./hardcover");
 
 function usage() {
-  console.log(`Usage: ./scripts/books COMMAND [ARGS...]
+  console.log(`Usage: docker compose run --rm admin COMMAND [ARGS...]
 
 Commands:
   bootstrap              Initialize container data paths and Calibre admin user
   health                 Check proxy, OPDS, and KOSync health
   verify [USER]          Run local route and per-user auth checks
   import FILE...         Import EPUB files into Calibre
-  sync-fixture           Copy and import the Books Sync Fixture EPUB
-  anna ARGS...           Run Anna's Archive MCP/CLI through the configured env
   users ARGS...          Manage reader users and credentials
-  hardcover ARGS...      Sync Hardcover Want to Read items into the library
-  opds-url               Print the catalog OPDS URL
-  kosync-url             Print the KOSync URL`);
+  hardcover ARGS...      Sync Hardcover Want to Read items into the library`);
 }
 
 function printAccount(row, json = false) {
@@ -136,16 +131,8 @@ async function hardcoverCommand(args) {
 }
 
 function importCommand(args) {
-  if (!args.length) throw new Error("No files supplied. Usage: ./scripts/books import FILE [FILE ...]");
+  if (!args.length) throw new Error("No files supplied. Usage: docker compose run --rm admin import FILE [FILE ...]");
   system.importFiles(args);
-}
-
-function syncFixture() {
-  const target = path.join(config.downloadDir, "books-sync-fixture.epub");
-  system.writeSyncFixture(target);
-  console.log(`Wrote ${target}`);
-  system.importFiles([target]);
-  console.log("Imported Books Sync Fixture into Calibre.");
 }
 
 async function main() {
@@ -156,14 +143,8 @@ async function main() {
   else if (command === "health") console.log(await system.health());
   else if (command === "verify") console.log(await system.verify(args.shift()));
   else if (command === "import") importCommand(args);
-  else if (command === "sync-fixture") syncFixture();
-  else if (command === "anna") {
-    const result = system.annas(args, { stdio: "inherit", check: false });
-    process.exitCode = result.status || 0;
-  } else if (command === "users") await users(args);
+  else if (command === "users") await users(args);
   else if (command === "hardcover") await hardcoverCommand(args);
-  else if (command === "opds-url") console.log(`https://${config.publicHost}/catalog`);
-  else if (command === "kosync-url") console.log(`https://${config.publicHost}/kosync`);
   else throw new Error(`Unknown command: ${command}`);
 }
 

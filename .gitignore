@@ -3,6 +3,7 @@
 *.env
 secrets/
 runtime/
+data/
 downloads/
 import/
 library/
