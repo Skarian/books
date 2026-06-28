@@ -11,6 +11,6 @@ They are not the implementation contract.
 - Use Calibre OPDS at `/catalog` as the book source.
 - Use KOReader anywhere it is the better device app.
 - Treat stock Kobo as optional.
-- Use `scripts/books users ...` as the owner workflow.
+- Use `docker compose run --rm admin users ...` as the owner workflow for now.
 - Preserve reproducibility: installs and config belong in repo scripts and
   templates, not manual VM state.

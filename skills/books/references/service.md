@@ -3,15 +3,16 @@
 ## Layout
 
 - Repo: `/home/exedev/books`
-- Env/secrets: `/etc/books/books.env`
-- Calibre library: `/srv/books/library`
-- Downloads: `/srv/books/downloads`
-- Import staging: `/srv/books/import`
-- Logs: `/srv/books/log`
-- Accounts: `/srv/books/config/state.json`
-- Calibre users: `/srv/books/config/users.sqlite`
-- KOSync state: `/srv/books/kosync`
-- Default public host: `books.exe.xyz`
+- Env: `.env`
+- Generated secrets: `data/config/secrets.json`
+- Calibre library: `data/library`
+- Downloads: `data/downloads`
+- Import staging: `data/import`
+- Logs: `data/log`
+- Accounts: `data/config/state.json`
+- Calibre users: `data/config/users.sqlite`
+- KOSync state: `data/kosync`
+- Example public host: `books.example.com`
 
 Compose services:
 
@@ -34,11 +35,11 @@ The proxy container listens on `BOOKS_PROXY_PORT`.
 - `/healthz` goes to the Node app.
 - `/` returns 404.
 
-The VM cannot call its own public `books.exe.xyz` endpoint. Use local checks:
+The VM may not be able to call its own public HTTPS endpoint. Use local checks:
 
 ```bash
-./scripts/books health
-./scripts/books verify USER
+docker compose run --rm admin health
+docker compose run --rm admin verify USER
 ```
 
 Use only documented exe.dev commands:
@@ -57,10 +58,10 @@ proxy at `127.0.0.1:8000` unless you deliberately change `BOOKS_BIND_ADDR`.
 Each reader gets one Books login. It works for setup, OPDS, and KOSync.
 
 ```bash
-./scripts/books users list
-./scripts/books users create "Name" --email person@example.com
-./scripts/books users show USER
-./scripts/books users reconcile
+docker compose run --rm admin users list
+docker compose run --rm admin users create "Name" --email person@example.com
+docker compose run --rm admin users show USER
+docker compose run --rm admin users reconcile
 ```
 
 Run `users reconcile` after onboarding or account changes if Calibre/KOSync state
@@ -77,8 +78,8 @@ https://web.readest.com/
 Then configure:
 
 ```text
-OPDS catalog: https://books.exe.xyz/catalog
-KOSync server: https://books.exe.xyz/kosync
+OPDS catalog: https://books.example.com/catalog
+KOSync server: https://books.example.com/kosync
 ```
 
 Use the same Books username and password for both.
@@ -88,23 +89,16 @@ Use the same Books username and password for both.
 Prefer English EPUBs.
 
 ```bash
-./scripts/books import /path/to/book.epub
-./scripts/books sync-fixture
+docker compose run --rm admin import /srv/books/import/book.epub
+docker compose run --rm admin import /app/fixtures/books-sync-fixture.epub
 ```
 
-The sync fixture writes `/srv/books/downloads/books-sync-fixture.epub` and
-imports `Books Sync Fixture` into Calibre.
+The fixture command imports `Books Sync Fixture` into Calibre.
 
 ## Anna's Archive MCP
 
 The installed binary is `/opt/books/bin/annas-mcp` inside the runtime image.
-
-Use it through the repo helper so env vars come from `/etc/books/books.env`:
-
-```bash
-./scripts/books anna book-search "query"
-./scripts/books anna book-download MD5_HASH filename.epub
-```
+Hardcover intake uses it internally.
 
 Respect copyright and terms. Ask before downloading when authorization is not
 clear.
@@ -114,9 +108,9 @@ clear.
 Configure a token per user:
 
 ```bash
-printf '%s\n' 'Bearer ...' | ./scripts/books hardcover set-token USER
-./scripts/books hardcover status USER
-./scripts/books hardcover sync --dry-run --user USER --limit 1
+printf '%s\n' 'Bearer ...' | docker compose run --rm -T admin hardcover set-token USER
+docker compose run --rm admin hardcover status USER
+docker compose run --rm admin hardcover sync --dry-run --user USER --limit 1
 ```
 
 The worker checks Want to Read every five minutes, imports fulfilled EPUBs into

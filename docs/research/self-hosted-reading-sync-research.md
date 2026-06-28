@@ -10,7 +10,7 @@ This is background research. For the working service docs, start with
 The recommended architecture is viable enough to implement and test:
 
 1. Keep Calibre as the canonical EPUB library, OPDS catalog, and download source.
-2. Add official KOReader Sync Server (`koreader/kosync`) as the single cross-app progress lane at `https://books.exe.xyz/kosync`.
+2. Add official KOReader Sync Server (`koreader/kosync`) as the single cross-app progress lane at `https://books.example.com/kosync`.
 3. Use that same KOSync endpoint from CrossPoint, KOReader, and Readest.
 4. Do not add WebDAV to the default build. Revisit it only after an OPDS+KOSync
    failure, or if Readest-only notes/backups become a hard requirement.
@@ -197,7 +197,7 @@ downloads, and duplicate titles.
 
 - Configure Readest on Android, iPad, macOS, and Windows.
 - Add Calibre OPDS with Basic auth.
-- Configure KOReader Sync in Readest against `https://books.exe.xyz/kosync` using that reader's own KOSync account.
+- Configure KOReader Sync in Readest against `https://books.example.com/kosync` using that reader's own KOSync account.
 - Set checksum/document matching to file content.
 - Leave WebDAV disconnected during the pilot.
 
@@ -228,7 +228,7 @@ downloads, and duplicate titles.
 
 The architecture passes only if:
 
-- CrossPoint can authenticate to `https://books.exe.xyz/kosync`.
+- CrossPoint can authenticate to `https://books.example.com/kosync`.
 - CrossPoint can upload local progress for a fixture EPUB and another client can pull it.
 - CrossPoint can apply remote progress from KOReader or Readest and land close enough to continue reading without hunting.
 - KOReader on at least one non-X4 device can push and pull the same fixture through KOSync with binary matching.

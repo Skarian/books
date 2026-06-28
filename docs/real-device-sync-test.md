@@ -10,12 +10,12 @@ physical devices.
 Run this on the VM:
 
 ```bash
-./scripts/books sync-fixture
-./scripts/books verify neil
+docker compose run --rm admin import /app/fixtures/books-sync-fixture.epub
+docker compose run --rm admin verify USER
 ```
 
-This copies the repo's tiny `Books Sync Fixture` EPUB and imports it into the
-Calibre catalog. No downloaded book is involved.
+This imports the repo's tiny `Books Sync Fixture` EPUB into the Calibre catalog.
+No downloaded book is involved.
 
 ## 2. Set up the first reader app
 
@@ -32,7 +32,7 @@ For Readest:
    away, search for that exact title.
 
 For KOReader or CrossPoint, add the catalog, download the same fixture book,
-and connect Progress Sync to `https://books.exe.xyz/kosync`.
+and connect Progress Sync to `https://books.example.com/kosync`.
 
 ## 3. Push a position
 
@@ -84,9 +84,9 @@ CrossPoint -> Readest Android: fail, opened at beginning.
 
 If a test fails, check these before changing the architecture:
 
-- Both devices downloaded `Books Sync Fixture` from `https://books.exe.xyz/catalog`.
+- Both devices downloaded `Books Sync Fixture` from `https://books.example.com/catalog`.
 - Both devices used the same reader's Books username and password.
 - Readest shows KOReader Sync as connected.
 - Readest shows Checksum Method as File Content.
 - KOReader uses binary matching if it exposes that setting.
-- The device is outside the VM and can reach `https://books.exe.xyz/kosync`.
+- The device is outside the VM and can reach `https://books.example.com/kosync`.

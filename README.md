@@ -17,7 +17,7 @@ The active deployment is Docker Compose:
 - `calibre`: `calibre-server` with OPDS and downloads.
 - `kosync`: pinned official KOReader Sync Server image.
 - `worker`: Hardcover intake loop, every five minutes by default.
-- `admin`: one-shot CLI container used by `./scripts/books`.
+- `admin`: one-shot CLI container for owner commands.
 
 There is no Calibre-Web service and no local reader UI. Compose is the app stack.
 
@@ -35,47 +35,45 @@ creation goes through the owner CLI.
 
 ## Runtime state
 
-These paths are created by onboarding and are not committed:
+These paths are created by `bootstrap` and are not committed:
 
-- `/etc/books/books.env`: secrets, API keys, paths, ports.
-- `/srv/books/library`: Calibre library.
-- `/srv/books/downloads`: Anna downloads and sync fixture copies.
-- `/srv/books/import`: temporary import files.
-- `/srv/books/log`: container logs written by the services.
-- `/srv/books/config/state.json`: readers, Books passwords, Hardcover tokens, daily counters.
-- `/srv/books/config/users.sqlite`: Calibre user database.
-- `/srv/books/kosync`: KOSync Redis state.
+- `.env`: operator config and API keys.
+- `data/config/secrets.json`: generated internal Calibre admin secret.
+- `data/library`: Calibre library.
+- `data/downloads`: Anna downloads.
+- `data/import`: temporary import files.
+- `data/log`: container logs written by the services.
+- `data/config/state.json`: readers, Books passwords, Hardcover tokens, daily counters.
+- `data/config/users.sqlite`: Calibre user database.
+- `data/kosync`: KOSync Redis state.
 
-Back up `/etc/books/books.env` and `/srv/books` if you care about the live
-library and user state.
+Back up `.env` and the configured data directory if you care about the live
+library, API keys, and user state.
 
 ## Fresh setup
 
 ```bash
 cd /home/exedev/books
-./scripts/onboard
+cp .env.example .env
+chmod 600 .env
+$EDITOR .env
+mkdir -p data/import
+docker compose build
+docker compose run --rm admin bootstrap
+docker compose up -d
+docker compose run --rm admin health
+docker compose run --rm admin users create "Alice" --email alice@example.com
+docker compose run --rm admin verify alice
 ```
 
-For a rebuild without prompts:
-
-```bash
-./scripts/onboard --non-interactive
-```
-
-Onboarding writes `/etc/books/books.env`, creates `/srv/books`, installs Docker
-if needed, builds the runtime image, starts Compose, reconciles users, and runs
-a local health check.
-
-You can also use the helper:
-
-```bash
-./scripts/books setup
-```
+Install Docker and Docker Compose before running the stack. This repo uses the
+standard Compose flow instead of a custom VM installer. Keep `.env` private; it
+can hold API keys.
 
 ## Deployment address
 
-The public host is not hardcoded. Set `BOOKS_PUBLIC_HOST` in
-`/etc/books/books.env` when this runs somewhere other than `books.exe.xyz`.
+The public host is not hardcoded. Set `BOOKS_PUBLIC_HOST` in `.env` to the host
+readers will use. The examples use `books.example.com`.
 
 For exe.dev, expose the loopback proxy from your local machine:
 
@@ -90,8 +88,8 @@ Return to private mode:
 ssh exe.dev share set-private books
 ```
 
-The VM cannot call its own public `books.exe.xyz` endpoint. Local checks use
-`BOOKS_LOCAL_BASE_URL`, which defaults to the proxy container inside Compose.
+The VM may not be able to call its own public HTTPS endpoint. Local checks use
+the internal Compose proxy.
 
 For a homelab, keep `BOOKS_BIND_ADDR=127.0.0.1` and point your normal reverse
 proxy at `127.0.0.1:8000`, or change the bind address deliberately.
@@ -99,20 +97,20 @@ proxy at `127.0.0.1:8000`, or change the bind address deliberately.
 ## Owner commands
 
 ```bash
-./scripts/books status
-./scripts/books health
-./scripts/books verify neil
-./scripts/books restart
-./scripts/books logs
+docker compose ps
+docker compose run --rm admin health
+docker compose run --rm admin verify alice
+docker compose restart
+docker compose logs -f
 ```
 
 Users:
 
 ```bash
-./scripts/books users list
-./scripts/books users create "Alice" --email alice@example.com
-./scripts/books users show alice
-./scripts/books users reconcile
+docker compose run --rm admin users list
+docker compose run --rm admin users create "Alice" --email alice@example.com
+docker compose run --rm admin users show alice
+docker compose run --rm admin users reconcile
 ```
 
 Each reader gets one Books username and one dice-roll-style passphrase. That
@@ -121,10 +119,8 @@ same login works for their setup page, OPDS catalog, and KOSync progress.
 Books:
 
 ```bash
-./scripts/books import /path/to/book.epub
-./scripts/books sync-fixture
-./scripts/books anna book-search "title author epub english"
-./scripts/books anna book-download MD5_HASH filename.epub
+docker compose run --rm admin import /srv/books/import/book.epub
+docker compose run --rm admin import /app/fixtures/books-sync-fixture.epub
 ```
 
 Only use acquisition tools for books you are allowed to access.
@@ -132,10 +128,10 @@ Only use acquisition tools for books you are allowed to access.
 Hardcover intake:
 
 ```bash
-printf '%s\n' 'Bearer ...' | ./scripts/books hardcover set-token neil
-./scripts/books hardcover status
-./scripts/books hardcover sync --dry-run --user neil --limit 1
-./scripts/books hardcover sync --user neil
+printf '%s\n' 'Bearer ...' | docker compose run --rm -T admin hardcover set-token alice
+docker compose run --rm admin hardcover status
+docker compose run --rm admin hardcover sync --dry-run --user alice --limit 1
+docker compose run --rm admin hardcover sync --user alice
 ```
 
 The sync loop reads Want to Read, looks for an English EPUB through Anna's
@@ -148,14 +144,14 @@ Currently Reading. The automatic intake cap is global for the VM and defaults to
 Give each reader their setup page:
 
 ```bash
-./scripts/books users show neil
+docker compose run --rm admin users show alice
 ```
 
 They should use:
 
 - Readest app or `https://web.readest.com/`.
-- Catalog URL: `https://books.exe.xyz/catalog`.
-- KOSync URL: `https://books.exe.xyz/kosync`.
+- Catalog URL: `https://books.example.com/catalog`.
+- KOSync URL: `https://books.example.com/kosync`.
 - The same Books username and password for both integrations.
 
 Readest account sync is not part of the backend contract. Set up OPDS and

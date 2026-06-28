@@ -1,28 +1,25 @@
 ---
 name: books
-description: Operate Neil's self-hosted Books backend: Docker Compose, Calibre OPDS, KOSync progress, Readest setup, Hardcover intake, Anna's Archive MCP downloads, imports, user credentials, and reproducible onboarding.
+description: Operate the self-hosted Books backend: Docker Compose, Calibre OPDS, KOSync progress, Readest setup, Hardcover intake, Anna's Archive MCP downloads, imports, user credentials, and reproducible onboarding.
 ---
 
 # Books
 
-## Use the repo helper
+## Use Docker Compose
 
 Work from `/home/exedev/books`.
 
-Prefer `./scripts/books` over direct service edits:
+Use the standard Compose interface:
 
-- `./scripts/books status`
-- `./scripts/books health`
-- `./scripts/books verify USER`
-- `./scripts/books restart`
-- `./scripts/books logs`
-- `./scripts/books users ...`
-- `./scripts/books hardcover ...`
-- `./scripts/books import /path/to/book.epub`
-- `./scripts/books sync-fixture`
-- `./scripts/books anna ...`
-- `./scripts/books opds-url`
-- `./scripts/books kosync-url`
+- `docker compose ps`
+- `docker compose run --rm admin health`
+- `docker compose run --rm admin verify USER`
+- `docker compose restart`
+- `docker compose logs -f`
+- `docker compose run --rm admin users ...`
+- `docker compose run --rm admin hardcover ...`
+- `docker compose run --rm admin import /srv/books/import/book.epub`
+- `docker compose run --rm admin import /app/fixtures/books-sync-fixture.epub`
 
 Only use acquisition/download tooling for material the user is legally allowed
 to access, such as public domain, Creative Commons, owned, or otherwise
@@ -37,19 +34,18 @@ without updating the repo file that recreates them:
 - `docker/books/Dockerfile`
 - `docker/books/entrypoint.sh`
 - `config/nginx/compose.conf`
-- `config/books.env.example`
-- `scripts/onboard`
-- `scripts/books`
+- `.env.example`
 
 Runtime books and secrets stay outside git:
 
-- `/etc/books/books.env`
-- `/srv/books/library`
-- `/srv/books/downloads`
-- `/srv/books/import`
-- `/srv/books/config/state.json`
-- `/srv/books/config/users.sqlite`
-- `/srv/books/kosync`
+- `.env`
+- `data/config/secrets.json`
+- `data/library`
+- `data/downloads`
+- `data/import`
+- `data/config/state.json`
+- `data/config/users.sqlite`
+- `data/kosync`
 
 Read `references/service.md` before changing deployment, Compose, nginx proxy,
 Calibre, OPDS, KOSync, Hardcover, Anna's Archive, or import behavior.

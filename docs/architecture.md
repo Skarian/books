@@ -23,7 +23,7 @@ build.
 - `calibre`: `calibre-server` with Basic auth and OPDS.
 - `kosync`: official KOReader Sync Server image pinned by digest.
 - `worker`: periodic `hardcover sync`.
-- `admin`: CLI container used by `./scripts/books`.
+- `admin`: one-shot CLI container for owner commands.
 
 The app, Calibre, worker, and admin containers mount `/srv/books`. The KOSync
 container mounts its Redis data under `/srv/books/kosync`.
@@ -31,7 +31,7 @@ container mounts its Redis data under `/srv/books/kosync`.
 ## Routes
 
 ```text
-https://books.exe.xyz
+https://books.example.com
   /catalog       -> Calibre OPDS, rewritten to /opds
   /opds          -> Calibre OPDS
   /get/...       -> Calibre downloads
@@ -50,15 +50,15 @@ Do not configure clients with `/api`, `/v1`, or `/healthcheck` appended to the
 KOSync URL. The client base URL is exactly:
 
 ```text
-https://books.exe.xyz/kosync
+https://books.example.com/kosync
 ```
 
 Nginx strips `/kosync` before proxying. For example,
 `/kosync/users/auth` reaches upstream `/users/auth`.
 
 Public `/kosync/users/create` is blocked. The KOSync container keeps
-registration enabled internally so `./scripts/books users create` can create the
-matching sync account.
+registration enabled internally so `docker compose run --rm admin users create`
+can create the matching sync account.
 
 ## Accounts
 
@@ -66,7 +66,7 @@ matching sync account.
 has one public login:
 
 ```text
-username: neil
+username: alice
 password: river-window-beacon-maple
 ```
 
@@ -79,8 +79,8 @@ That login works for:
 The same JSON file stores Hardcover tokens and the VM-wide daily download count.
 Secrets stay out of git.
 
-`./scripts/books users reconcile` pushes account state into Calibre and KOSync.
-It does not change existing Books passwords.
+`docker compose run --rm admin users reconcile` pushes account state into
+Calibre and KOSync. It does not change existing Books passwords.
 
 ## Progress
 
@@ -112,28 +112,32 @@ whole VM. It is not per user.
 
 ## Runtime state
 
-Git contains the Compose file, Dockerfile, scripts, proxy config, and docs.
+Git contains the Compose file, Dockerfile, runtime source, proxy config, and
+docs.
 
 Runtime state lives here:
 
-- `/etc/books/books.env`
-- `/srv/books/library`
-- `/srv/books/downloads`
-- `/srv/books/import`
-- `/srv/books/log`
-- `/srv/books/config/state.json`
-- `/srv/books/config/users.sqlite`
-- `/srv/books/kosync`
+- `.env`
+- `data/config/secrets.json`
+- `data/library`
+- `data/downloads`
+- `data/import`
+- `data/log`
+- `data/config/state.json`
+- `data/config/users.sqlite`
+- `data/kosync`
 
 Restore flow:
 
 1. Clone the repo.
-2. Restore `/etc/books/books.env`.
-3. Restore `/srv/books`.
-4. Run `./scripts/onboard`.
-5. Run `./scripts/books users reconcile`.
-6. Run `./scripts/books health`.
-7. Run `./scripts/books verify USER`.
+2. Restore `.env`.
+3. Restore the configured data directory.
+4. Run `docker compose build`.
+5. Run `docker compose run --rm admin bootstrap`.
+6. Run `docker compose up -d`.
+7. Run `docker compose run --rm admin users reconcile`.
+8. Run `docker compose run --rm admin health`.
+9. Run `docker compose run --rm admin verify USER`.
 
 No required restore step should live only in shell history or a manual edit under
 `/etc`.

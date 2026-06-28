@@ -1,6 +1,6 @@
 # Device Sync Test Matrix
 
-Use this after `./scripts/books verify USER` passes locally. The VM can prove
+Use this after `docker compose run --rm admin verify USER` passes locally. The VM can prove
 that the proxy, OPDS auth, and KOSync auth work. Real devices prove whether the
 reading apps agree on the same book identity and location.
 
@@ -20,8 +20,8 @@ Kobo is optional. WebDAV is not part of the default build.
 Create the test EPUB:
 
 ```bash
-./scripts/books sync-fixture
-./scripts/books verify neil
+docker compose run --rm admin import /app/fixtures/books-sync-fixture.epub
+docker compose run --rm admin verify USER
 ```
 
 | Fixture | Source | Raw SHA256 | KOReader partial MD5 | Notes |
@@ -32,8 +32,8 @@ Create the test EPUB:
 
 | Component | Version/tag/digest | Local path | Public route | Notes |
 |---|---|---|---|---|
-| Calibre |  | `/srv/books/library` | `/catalog`, `/opds`, `/get/...` | EPUB source |
-| KOSync |  | `/srv/books/kosync` | `/kosync` | Progress |
+| Calibre |  | `data/library` | `/catalog`, `/opds`, `/get/...` | EPUB source |
+| KOSync |  | `data/kosync` | `/kosync` | Progress |
 | Readest |  | hosted by Readest | `https://web.readest.com/` | Reader UI |
 
 ## Client Versions
@@ -54,7 +54,7 @@ Create the test EPUB:
 Pass only if the device downloads from:
 
 ```text
-https://books.exe.xyz/catalog
+https://books.example.com/catalog
 ```
 
 | Device/app | Auth works | Fixture visible | Download works | Raw SHA256 matches | Partial MD5 matches | Notes |
@@ -72,7 +72,7 @@ https://books.exe.xyz/catalog
 The client base URL is exactly:
 
 ```text
-https://books.exe.xyz/kosync
+https://books.example.com/kosync
 ```
 
 Do not append `/api`, `/v1`, or `/healthcheck`.
@@ -135,5 +135,5 @@ If progress does not move:
 - Confirm both devices use the same Books login for that test.
 - Confirm Readest uses File Content.
 - Confirm KOReader uses binary matching.
-- Confirm the device can reach `https://books.exe.xyz/kosync`.
+- Confirm the device can reach `https://books.example.com/kosync`.
 - Try the same direction with KOReader, since it is the reference client.

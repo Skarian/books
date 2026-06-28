@@ -113,7 +113,7 @@ The setup page should be task-first, not service-first.
 Suggested structure:
 
 1. Header
-   - "Neil's Books for Alice"
+   - "Owner's Books for Alice"
    - "Everyone shares the same books. Your reading place and Readest notes are yours."
    - one visible username
 2. Choose your device
@@ -122,12 +122,12 @@ Suggested structure:
    - Kobo: KOReader if shared progress matters
    - Stock Kobo: experimental
 3. Read books
-   - OPDS URL: `https://books.exe.xyz/opds`
+   - OPDS URL: `https://books.example.com/opds`
    - the user's OPDS username
    - the user's OPDS password or a rotate/reset action
    - instruction to download from the shared bookshelf so EPUB identity stays stable
 4. Sync my place
-   - KOSync URL: `https://books.exe.xyz/kosync`
+   - KOSync URL: `https://books.example.com/kosync`
    - the user's KOSync username
    - the user's KOSync password or a rotate/reset action
    - Readest matching: File Content
