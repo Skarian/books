@@ -1,7 +1,7 @@
 # Device Sync Test Matrix
 
-Use this after `docker compose run --rm admin verify USER` passes locally. The
-VM can prove that the proxy, OPDS auth, and KOSync auth work. Real devices prove
+Use this after `docker compose run --rm admin health` passes locally. The VM can
+prove that the proxy, OPDS auth, and KOSync health work. Real devices prove
 whether the reading apps agree on the same book identity and location.
 
 Test date:
@@ -15,18 +15,14 @@ login per reader.
 
 Kobo is optional. The default sync path is OPDS plus KOSync.
 
-## Fixture
+## Test book
 
-Create the test EPUB:
+Choose a short EPUB already in the catalog. Use the same title for every device
+in this matrix.
 
-```bash
-docker compose run --rm admin import /app/fixtures/books-sync-fixture.epub
-docker compose run --rm admin verify USER
-```
-
-| Fixture | Source | Raw SHA256 | KOReader partial MD5 | Notes |
+| Book | Source | Raw SHA256 | KOReader partial MD5 | Notes |
 |---|---|---|---|---|
-| Books Sync Fixture | repo fixture |  |  |  |
+|  | Catalog download |  |  |  |
 
 ## Server Versions
 
@@ -57,7 +53,7 @@ Pass condition: the device downloads from:
 https://books.example.com/catalog
 ```
 
-| Device/app | Auth works | Fixture visible | Download works | Raw SHA256 matches | Partial MD5 matches | Notes |
+| Device/app | Auth works | Book visible | Download works | Raw SHA256 matches | Partial MD5 matches | Notes |
 |---|---|---|---|---|---|---|
 | CrossPoint |  |  |  |  |  |  |
 | KOReader |  |  |  |  |  |  |
@@ -111,7 +107,7 @@ collections stay in the reader app.
 
 ## Family Isolation
 
-Use the same fixture with two different Books users.
+Use the same book with two different Books users.
 
 | User A app | User B app | A progress preserved | B progress preserved | Notes |
 |---|---|---|---|---|
@@ -133,7 +129,7 @@ Use the same fixture with two different Books users.
 
 If progress stays put:
 
-- Confirm both devices downloaded `Books Sync Fixture` from `/catalog`.
+- Confirm both devices downloaded the same book from `/catalog`.
 - Confirm both devices use the same Books login for that test.
 - Confirm Readest uses File Content.
 - Confirm KOReader uses binary matching.

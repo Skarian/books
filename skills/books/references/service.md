@@ -35,7 +35,6 @@ Use local checks from inside the VM:
 
 ```bash
 docker compose run --rm admin health
-docker compose run --rm admin verify USER
 ```
 
 Use only documented exe.dev commands:
@@ -89,10 +88,7 @@ Prefer English EPUBs.
 
 ```bash
 docker compose run --rm admin import /srv/books/import/book.epub
-docker compose run --rm admin import /app/fixtures/books-sync-fixture.epub
 ```
-
-The fixture command imports `Books Sync Fixture` into Calibre.
 
 ## Anna's Archive MCP
 

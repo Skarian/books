@@ -12,7 +12,6 @@ function usage() {
 Commands:
   bootstrap              Initialize container data paths and Calibre admin user
   health                 Check proxy, OPDS, and KOSync health
-  verify [USER]          Run local route and per-user auth checks
   import FILE...         Import EPUB files into Calibre
   users ARGS...          Manage reader users and credentials
   hardcover ARGS...      Sync Hardcover Want to Read items into the library`);
@@ -141,7 +140,6 @@ async function main() {
   if (!command || ["-h", "--help"].includes(command)) usage();
   else if (command === "bootstrap") system.bootstrap();
   else if (command === "health") console.log(await system.health());
-  else if (command === "verify") console.log(await system.verify(args.shift()));
   else if (command === "import") importCommand(args);
   else if (command === "users") await users(args);
   else if (command === "hardcover") await hardcoverCommand(args);

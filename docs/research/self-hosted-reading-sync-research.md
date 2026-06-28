@@ -177,12 +177,12 @@ downloads, and duplicate titles.
 
 ## Implementation Plan
 
-### Phase 1: Fixture Identity
+### Phase 1: Book Identity
 
 - Pick three legally owned, public-domain, or otherwise authorized EPUBs.
 - Record raw SHA256 and KOReader partial-MD5-style identity.
 - Verify Calibre OPDS downloads preserve bytes.
-- Add a repo probe that downloads `/get/...` and compares fixture hashes.
+- Compare `/get/...` downloads against local file hashes during manual probes.
 
 ### Phase 2: Official KOSync
 
@@ -205,7 +205,7 @@ downloads, and duplicate titles.
 
 - Configure CrossPoint to the same KOSync endpoint and that reader's own KOSync user.
 - Configure KOReader to the same endpoint and binary matching.
-- Download the same fixture EPUBs from Calibre OPDS.
+- Download the same test EPUBs from Calibre OPDS.
 - Test push and pull in every direction that matters.
 
 ### Phase 4.5: Family Accounts And Admin Panel
@@ -220,7 +220,7 @@ downloads, and duplicate titles.
 
 ### Phase 5: Optional Kobo/Server Sidecars
 
-- Only after the core lane passes, run BookOrbit and Komga against copied fixture libraries.
+- Only after the core lane passes, run BookOrbit and Komga against copied test libraries.
 - Do not grant sidecars write access to `/srv/books/library`.
 - Keep a sidecar only if it proves backup/restore, file identity, Kobo precision, and CrossPoint/KOReader non-interference.
 
@@ -229,9 +229,9 @@ downloads, and duplicate titles.
 The architecture passes only if:
 
 - CrossPoint can authenticate to `https://books.example.com/kosync`.
-- CrossPoint can upload local progress for a fixture EPUB and another client can pull it.
+- CrossPoint can upload local progress for a test EPUB and another client can pull it.
 - CrossPoint can apply remote progress from KOReader or Readest and land close enough to continue reading without hunting.
-- KOReader on at least one non-X4 device can push and pull the same fixture through KOSync with binary matching.
+- KOReader on at least one non-X4 device can push and pull the same test book through KOSync with binary matching.
 - Readest on iPad, Android, macOS, and Windows can push and pull progress through KOSync using file-content matching.
 - Two different users can read the same canonical EPUB without KOSync progress collisions.
 - A disabled user can no longer access OPDS, KOSync, setup pages, or optional upload.
@@ -247,7 +247,7 @@ If CrossPoint lands only at chapter starts for normal EPUBs, the architecture is
 - nginx route for `/kosync` with prefix stripping and no exe.dev owner gate
 - `config/books.env.example` additions for ports, image tags/digests, paths, and bootstrap-only credentials
 - `scripts/onboard` KOSync bootstrap
-- `scripts/books kosync-health`, `kosync-auth`, and fixture progress probes
+- `scripts/books kosync-health`, `kosync-auth`, and progress probes
 - `scripts/books users ...` account lifecycle commands
 - optional owner admin panel that wraps the user CLI/helper
 - `bin/books-hash` or equivalent for raw SHA256 plus KOReader-style partial MD5 checks
@@ -259,7 +259,7 @@ Do not build a broad progress bridge yet. Readest already has a direct KOSync cl
 
 Safe future utilities:
 
-- fixture hash verifier
+- OPDS hash verifier
 - OPDS download identity checker
 - KOSync progress inspector
 - backup integrity checker

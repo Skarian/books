@@ -13,13 +13,11 @@ Use the standard Compose interface:
 
 - `docker compose ps`
 - `docker compose run --rm admin health`
-- `docker compose run --rm admin verify USER`
 - `docker compose restart`
 - `docker compose logs -f`
 - `docker compose run --rm admin users ...`
 - `docker compose run --rm admin hardcover ...`
 - `docker compose run --rm admin import /srv/books/import/book.epub`
-- `docker compose run --rm admin import /app/fixtures/books-sync-fixture.epub`
 
 Only use acquisition/download tooling for material the user is legally allowed
 to access, such as public domain, Creative Commons, owned, or otherwise

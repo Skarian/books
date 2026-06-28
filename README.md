@@ -59,7 +59,6 @@ docker compose run --rm admin bootstrap
 docker compose up -d
 docker compose run --rm admin health
 docker compose run --rm admin users create "Alice" --email alice@example.com
-docker compose run --rm admin verify alice
 ```
 
 Install Docker and Docker Compose before running the stack. Keep `.env` private;
@@ -87,7 +86,6 @@ Use the internal Compose proxy for local checks:
 
 ```bash
 docker compose run --rm admin health
-docker compose run --rm admin verify alice
 ```
 
 For a homelab, keep `BOOKS_BIND_ADDR=127.0.0.1` and point your normal reverse
@@ -98,7 +96,6 @@ proxy at `127.0.0.1:8000`, or change the bind address deliberately.
 ```bash
 docker compose ps
 docker compose run --rm admin health
-docker compose run --rm admin verify alice
 docker compose restart
 docker compose logs -f
 ```
@@ -119,7 +116,6 @@ Books:
 
 ```bash
 docker compose run --rm admin import /srv/books/import/book.epub
-docker compose run --rm admin import /app/fixtures/books-sync-fixture.epub
 ```
 
 Only use acquisition tools for books you are allowed to access.

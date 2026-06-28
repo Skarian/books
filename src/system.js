@@ -169,41 +169,6 @@ async function health() {
   return "ok";
 }
 
-async function verify(slug) {
-  const row = slug ? state.getAccount(slug) : state.firstActiveAccount();
-  if (!row) throw new Error('No active user exists. Create one with `docker compose run --rm admin users create "Name" --email person@example.com`.');
-  const basic = Buffer.from(`${row.slug}:${row.books_password}`).toString("base64");
-  await fetchOk(`${config.localBaseUrl}/healthz`);
-  const root = await fetch(`${config.localBaseUrl}/`);
-  if (root.status !== 404) throw new Error(`root route returned ${root.status}, expected 404`);
-  const library = await fetch(`${config.localBaseUrl}/library`, { redirect: "manual" });
-  if (![301, 302, 307, 308].includes(library.status)) throw new Error(`library route returned ${library.status}, expected redirect`);
-  const setup = await fetch(`${config.localBaseUrl}/setup/${row.slug}`, { headers: { Authorization: `Basic ${basic}` } });
-  if (setup.status !== 404) throw new Error(`setup route returned ${setup.status}, expected 404`);
-  await fetchOk(`${config.localBaseUrl}/opds`, { headers: { Authorization: `Basic ${basic}` } });
-  await fetchOk(`${config.localBaseUrl}/catalog`, { headers: { Authorization: `Basic ${basic}` } });
-  await fetchOk(`${config.localBaseUrl}/kosync/healthcheck`, { headers: { Accept: "application/vnd.koreader.v1+json" } });
-  const kosyncHeaders = {
-    Accept: "application/vnd.koreader.v1+json",
-    "Content-Type": "application/json",
-    "x-auth-user": row.slug,
-    "x-auth-key": state.md5(row.books_password)
-  };
-  await fetchOk(`${config.localBaseUrl}/kosync/users/auth`, { headers: kosyncHeaders });
-  const doc = "0123456789abcdef0123456789abcdef";
-  await fetchOk(`${config.localBaseUrl}/kosync/syncs/progress`, {
-    method: "PUT",
-    headers: kosyncHeaders,
-    body: JSON.stringify({ document: doc, progress: "/body/DocFragment[1]/p[1]", percentage: 0.42, device: "books-verify", device_id: "books-verify" })
-  });
-  const progress = await fetchOk(`${config.localBaseUrl}/kosync/syncs/progress/${doc}`, { headers: kosyncHeaders });
-  const data = await progress.json();
-  if (data.document !== doc || Math.abs(Number(data.percentage) - 0.42) > 0.001) {
-    throw new Error("KOSync progress verification failed");
-  }
-  return `ok: local production checks passed for ${row.slug}`;
-}
-
 module.exports = {
   run,
   ensureDir,
@@ -211,6 +176,5 @@ module.exports = {
   reconcile,
   annas,
   importFiles,
-  health,
-  verify
+  health
 };

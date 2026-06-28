@@ -73,15 +73,10 @@ settings.
 
 For this library, use OPDS for books and KOSync for progress.
 
-After setup, test with `Books Sync Fixture`. The owner can add it with:
-
-```bash
-docker compose run --rm admin import /app/fixtures/books-sync-fixture.epub
-```
-
-Open the fixture on one device, go to `Sync marker three`, then open the same
-fixture on another device. If the second device lands near that marker, the core
-sync path is working.
+After setup, test with any short book from the catalog. Open it on one device,
+move to a clear section or chapter, then open the same catalog download on
+another device. If the second device lands near that spot, the core sync path is
+working.
 
 ## KOReader
 

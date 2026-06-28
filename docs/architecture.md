@@ -131,7 +131,6 @@ Restore flow:
 6. Run `docker compose up -d`.
 7. Run `docker compose run --rm admin users reconcile`.
 8. Run `docker compose run --rm admin health`.
-9. Run `docker compose run --rm admin verify USER`.
 
 Every required restore step is captured in the repo or the restored data
 directory.

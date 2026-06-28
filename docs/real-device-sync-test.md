@@ -6,15 +6,8 @@ whether CrossPoint, Readest apps, and KOReader land in the right place.
 
 ## 1. Add the test book
 
-Run this on the VM:
-
-```bash
-docker compose run --rm admin import /app/fixtures/books-sync-fixture.epub
-docker compose run --rm admin verify USER
-```
-
-This imports the repo's tiny `Books Sync Fixture` EPUB into the Calibre catalog.
-No downloaded book is involved.
+Pick a short EPUB that is already in the Calibre catalog. Use the same title on
+every device in the test.
 
 ## 2. Set up the first reader app
 
@@ -28,22 +21,21 @@ For Readest:
 
 1. Sign in to your Readest account.
 2. Add the OPDS catalog from Import Menu, then Online Library.
-3. Download `Books Sync Fixture` from the catalog. If it is hard to find, search
-   for that exact title.
-4. Open the fixture.
+3. Download the test book from the catalog.
+4. Open the book.
 5. Open Book Menu, then KOReader Sync.
 6. Set the server to `https://books.example.com/kosync`.
 7. Use the same Books login and leave Checksum Method set to File Content.
 
-For KOReader or CrossPoint, add the catalog, download the same fixture book,
-and connect Progress Sync to `https://books.example.com/kosync`.
+For KOReader or CrossPoint, add the catalog, download the same book, and connect
+Progress Sync to `https://books.example.com/kosync`.
 
 ## 3. Push a position
 
 On device one:
 
-1. Open `Books Sync Fixture`.
-2. Go to `Sync marker three`.
+1. Open the test book.
+2. Go to a section you can easily recognize later.
 3. Wait a few seconds, then use the app's sync command if it has one.
 4. Close the book.
 
@@ -55,14 +47,14 @@ menu.
 
 On device two:
 
-1. Download `Books Sync Fixture` from the same catalog.
+1. Download the same book from the same catalog.
 2. Make sure the same user's KOSync account is connected.
 3. Open the book and pull progress if the app asks.
 4. Check where it lands.
 
 Pass:
 
-- It opens at `Sync marker three`, or close enough that you can keep reading.
+- It opens at the same section, or close enough that you can keep reading.
 
 Limited pass:
 
@@ -81,14 +73,14 @@ Fail:
 Write the result into `docs/device-sync-test-matrix.md`. Use plain notes:
 
 ```text
-Readest Web -> KOReader Desktop: pass, landed at marker three.
+Readest Web -> KOReader Desktop: pass, landed at the same section.
 Readest iPad -> CrossPoint: limited pass, landed at chapter start.
 CrossPoint -> Readest Android: fail, opened at beginning.
 ```
 
 If a test fails, check these before changing the architecture:
 
-- Both devices downloaded `Books Sync Fixture` from `https://books.example.com/catalog`.
+- Both devices downloaded the same book from `https://books.example.com/catalog`.
 - Both devices used the same reader's Books username and password.
 - Readest shows KOReader Sync as connected.
 - Readest shows Checksum Method as File Content.
