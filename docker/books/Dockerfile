@@ -41,4 +41,4 @@ COPY . .
 RUN chmod +x /app/src/cli.js /app/docker/books/entrypoint.sh
 
 ENTRYPOINT ["/app/docker/books/entrypoint.sh"]
-CMD ["node", "src/server.js"]
+CMD ["node", "src/cli.js", "--help"]

@@ -17,7 +17,6 @@
 Compose services:
 
 - `proxy`
-- `app`
 - `calibre`
 - `kosync`
 - `worker`
@@ -30,9 +29,8 @@ The proxy container listens on `BOOKS_PROXY_PORT`.
 - `/catalog`, `/opds`, and `/get/...` go to Calibre.
 - `/kosync` goes to KOSync with the prefix stripped.
 - `/kosync/users/create` is blocked publicly.
-- `/setup/<user>` goes to the Node app and uses that user's Books login.
 - `/library` redirects to `https://web.readest.com/`.
-- `/healthz` goes to the Node app.
+- `/healthz` is served by nginx.
 - `/` returns 404.
 
 The VM may not be able to call its own public HTTPS endpoint. Use local checks:
@@ -55,7 +53,7 @@ proxy at `127.0.0.1:8000` unless you deliberately change `BOOKS_BIND_ADDR`.
 
 ## Users
 
-Each reader gets one Books login. It works for setup, OPDS, and KOSync.
+Each reader gets one Books login. It works for OPDS and KOSync.
 
 ```bash
 docker compose run --rm admin users list

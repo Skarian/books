@@ -11,8 +11,6 @@ const logDir = path.join(dataDir, "log");
 
 module.exports = {
   publicHost: value("BOOKS_PUBLIC_HOST", "books.example.com"),
-  nodeHost: "0.0.0.0",
-  nodePort: 8090,
   localBaseUrl: "http://proxy:8000",
   dataDir,
   configDir,

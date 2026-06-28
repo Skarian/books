@@ -19,7 +19,11 @@ No downloaded book is involved.
 
 ## 2. Set up the first reader app
 
-Open the user's setup page and follow the steps there.
+Print the user's handoff and use `docs/reader-setup.md`:
+
+```bash
+docker compose run --rm admin users show USER
+```
 
 For Readest:
 

@@ -2,8 +2,8 @@
 
 The family model is shared books with private reading position.
 
-Each person gets one Books login. They use it for the setup page, the OPDS
-catalog, and KOSync. They still use their own Readest account in the Readest app.
+Each person gets one Books login. They use it for the OPDS catalog and KOSync.
+They still use their own Readest account in the Readest app.
 
 ## Account shape
 
@@ -41,15 +41,15 @@ There is no reader-facing dashboard yet. There is also no password reset or
 account suspension command in the current contract. If an account is wrong
 during early development, fix the state deliberately and rerun `users reconcile`.
 
-## Setup pages
+## Reader handoff
 
-Each setup page is protected by that user's Books login:
+The owner prints a reader's setup values with:
 
-```text
-https://books.example.com/setup/alice
+```bash
+docker compose run --rm admin users show alice
 ```
 
-The page shows:
+The output shows:
 
 - the one Books username and password
 - Readest Web link
@@ -57,8 +57,8 @@ The page shows:
 - KOSync URL
 - Hardcover request note
 
-It must not show owner credentials, Anna API keys, local ports, Redis paths,
-container internals, the data directory, or `.env`.
+Send those values out-of-band and point the reader at `docs/reader-setup.md`.
+There is no reader-facing setup website in the current stack.
 
 ## Reader instructions
 

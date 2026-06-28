@@ -124,8 +124,7 @@ Use the same fixture with two different Books users.
 | Reconcile users | Calibre and KOSync users are rebuilt without rotating passwords |  |  |
 | Show user | Owner can recover the one Books login |  |  |
 | Public KOSync registration | `/kosync/users/create` returns 404 |  |  |
-| Setup page privacy | User sees only their own credentials |  |  |
-| Setup page caching | Page sends no-store headers |  |  |
+| Setup website absent | `/setup/USER` returns 404 |  |  |
 
 ## Failure Checks
 

@@ -100,7 +100,6 @@ function accountPayload(row) {
     display_name: row.display_name,
     email: row.email,
     status: row.status,
-    setup_url: `https://${config.publicHost}/setup/${row.slug}`,
     books_username: row.slug,
     books_password: row.books_password,
     readest_url: "https://web.readest.com/",

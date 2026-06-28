@@ -178,9 +178,8 @@ async function verify(slug) {
   if (root.status !== 404) throw new Error(`root route returned ${root.status}, expected 404`);
   const library = await fetch(`${config.localBaseUrl}/library`, { redirect: "manual" });
   if (![301, 302, 307, 308].includes(library.status)) throw new Error(`library route returned ${library.status}, expected redirect`);
-  const setupUnauthed = await fetch(`${config.localBaseUrl}/setup/${row.slug}`);
-  if (setupUnauthed.status !== 401) throw new Error(`setup without auth returned ${setupUnauthed.status}, expected 401`);
-  await fetchOk(`${config.localBaseUrl}/setup/${row.slug}`, { headers: { Authorization: `Basic ${basic}` } });
+  const setup = await fetch(`${config.localBaseUrl}/setup/${row.slug}`, { headers: { Authorization: `Basic ${basic}` } });
+  if (setup.status !== 404) throw new Error(`setup route returned ${setup.status}, expected 404`);
   await fetchOk(`${config.localBaseUrl}/opds`, { headers: { Authorization: `Basic ${basic}` } });
   await fetchOk(`${config.localBaseUrl}/catalog`, { headers: { Authorization: `Basic ${basic}` } });
   await fetchOk(`${config.localBaseUrl}/kosync/healthcheck`, { headers: { Accept: "application/vnd.koreader.v1+json" } });

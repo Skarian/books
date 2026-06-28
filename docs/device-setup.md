@@ -15,17 +15,19 @@ setup. It is a separate sync lane and this repo does not run it.
 Examples use `books.example.com`. Replace it with the value of
 `BOOKS_PUBLIC_HOST` from `.env`.
 
-Each reader has these credentials:
+Each reader has one Books username and password. The owner prints it with:
+
+```bash
+docker compose run --rm admin users show USER
+```
+
+Use it for OPDS and KOSync:
 
 | Use | URL | Credential |
 |---|---|---|
 | Read in browser or Readest apps | `https://web.readest.com/` | Your own Readest account |
-| Open your setup page | `https://books.example.com/setup/USER` | Books username and password |
 | Download books | `https://books.example.com/catalog` | Same Books username and password |
 | Sync reading position | `https://books.example.com/kosync` | Same Books username and password |
-
-The setup page for each reader shows their one Books login. The owner can print
-the same value with `docker compose run --rm admin users show USER`.
 
 Use `https://books.example.com/catalog` when the app accepts any OPDS URL. The
 legacy `/opds` path remains available for clients that expect that name.
@@ -74,7 +76,7 @@ an admin dashboard.
 
 Readest's own account sync is convenient when it works, but this repo does not
 depend on it. If a second device does not show the catalog or KOSync settings,
-enter the same Books login from the setup page.
+enter the same Books login from the owner handoff.
 
 Do not turn on Readest WebDAV. It is not needed for book downloads or progress
 sync, and it can introduce a second progress path.

@@ -13,7 +13,6 @@ outside git.
 The active deployment is Docker Compose:
 
 - `proxy`: nginx on `BOOKS_BIND_ADDR:BOOKS_PROXY_PORT`.
-- `app`: Node setup pages and health checks.
 - `calibre`: `calibre-server` with OPDS and downloads.
 - `kosync`: pinned official KOReader Sync Server image.
 - `worker`: Hardcover intake loop, every five minutes by default.
@@ -27,8 +26,8 @@ Public routes:
 - `/opds`: the same catalog, kept for clients that expect the Calibre path.
 - `/get/...`: Calibre downloads.
 - `/kosync`: KOReader-compatible progress sync.
-- `/setup/<user>`: setup page for one reader, protected by that reader's Books login.
 - `/library`: redirect to hosted Readest Web.
+- `/healthz`: simple nginx health check.
 
 Everything else returns 404. Public KOSync account creation is blocked; user
 creation goes through the owner CLI.
@@ -114,7 +113,7 @@ docker compose run --rm admin users reconcile
 ```
 
 Each reader gets one Books username and one dice-roll-style passphrase. That
-same login works for their setup page, OPDS catalog, and KOSync progress.
+same login works for their OPDS catalog and KOSync progress.
 
 Books:
 
@@ -141,13 +140,13 @@ Currently Reading. The automatic intake cap is global for the VM and defaults to
 
 ## Reader setup
 
-Give each reader their setup page:
+Print the handoff for the reader:
 
 ```bash
 docker compose run --rm admin users show alice
 ```
 
-They should use:
+Then send them the values and `docs/reader-setup.md`. They should use:
 
 - Readest app or `https://web.readest.com/`.
 - Catalog URL: `https://books.example.com/catalog`.
@@ -160,6 +159,7 @@ KOSync on each device unless Readest clearly syncs those settings for that user.
 ## Docs
 
 - `docs/architecture.md`: how the containers fit together.
+- `docs/reader-setup.md`: short setup guide to send to a reader.
 - `docs/device-setup.md`: reader app setup.
 - `docs/real-device-sync-test.md`: physical-device sync check.
 - `docs/family-users.md`: user lifecycle and per-user credentials.

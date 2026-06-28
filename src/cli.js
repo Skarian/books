@@ -22,11 +22,11 @@ function printAccount(row, json = false) {
   const payload = state.accountPayload(row);
   if (json) return console.log(JSON.stringify(payload, null, 2));
   console.log(`${payload.display_name} (${payload.slug}) [${payload.status}]`);
-  console.log(`Setup: ${payload.setup_url}`);
   console.log();
-  console.log("Use this login for setup, the book catalog, and reading sync:");
+  console.log("Use this login for the book catalog and reading sync:");
   console.log(`Username: ${payload.books_username}`);
   console.log(`Password: ${payload.books_password}`);
+  console.log("Reader guide: docs/reader-setup.md");
   console.log();
   console.log(`Readest: ${payload.readest_url}`);
   console.log("Readest account: create or sign in with your own Readest account.");

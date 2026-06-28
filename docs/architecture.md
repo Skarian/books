@@ -8,7 +8,7 @@ The design is plain:
 - Calibre owns book files, metadata, OPDS, and downloads.
 - KOSync owns reading position.
 - Hosted Readest owns the reader UI and Readest accounts.
-- The Node app owns setup pages and the owner CLI.
+- The Node CLI owns setup, imports, account reconciliation, and intake commands.
 - Hardcover Want to Read is the automatic intake list.
 
 No local web reader, dashboard, or Calibre-Web instance is part of the default
@@ -19,14 +19,13 @@ build.
 `compose.yaml` defines the stack:
 
 - `proxy`: nginx, bound to `BOOKS_BIND_ADDR:BOOKS_PROXY_PORT`.
-- `app`: Node HTTP service for `/setup/<user>` and `/healthz`.
 - `calibre`: `calibre-server` with Basic auth and OPDS.
 - `kosync`: official KOReader Sync Server image pinned by digest.
 - `worker`: periodic `hardcover sync`.
 - `admin`: one-shot CLI container for owner commands.
 
-The app, Calibre, worker, and admin containers mount `/srv/books`. The KOSync
-container mounts its Redis data under `/srv/books/kosync`.
+Calibre, worker, and admin containers mount `/srv/books`. The KOSync container
+mounts its Redis data under `/srv/books/kosync`.
 
 ## Routes
 
@@ -36,15 +35,14 @@ https://books.example.com
   /opds          -> Calibre OPDS
   /get/...       -> Calibre downloads
   /kosync        -> KOReader Sync Server, prefix stripped by nginx
-  /setup/<user>  -> Node setup page for that user
   /library       -> redirect to https://web.readest.com/
-  /healthz       -> app health
+  /healthz       -> nginx health
   /              -> 404
 ```
 
 Reader routes must work without an exe.dev browser session. OPDS uses Calibre
-Basic auth. KOSync uses KOSync auth. Setup pages use the same Books login as the
-reader apps.
+Basic auth. KOSync uses KOSync auth. There is no reader-facing dashboard or
+setup website.
 
 Do not configure clients with `/api`, `/v1`, or `/healthcheck` appended to the
 KOSync URL. The client base URL is exactly:
@@ -72,12 +70,12 @@ password: river-window-beacon-maple
 
 That login works for:
 
-- `/setup/<user>`
 - `/catalog`
 - `/kosync`
 
-The same JSON file stores Hardcover tokens and the VM-wide daily download count.
-Secrets stay out of git.
+`docker compose run --rm admin users show USER` prints the handoff the owner can
+send to the reader. The same JSON file stores Hardcover tokens and the VM-wide
+daily download count. Secrets stay out of git.
 
 `docker compose run --rm admin users reconcile` pushes account state into
 Calibre and KOSync. It does not change existing Books passwords.
