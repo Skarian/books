@@ -21,8 +21,8 @@ usage() {
   cat <<'EOF'
 Usage: ./scripts/onboard [--non-interactive]
 
-Creates the Books env file, data directories, Docker Compose stack, one-shot
-SQLite-to-JSON cutover, Calibre admin user, and reader service reconciliation.
+Creates the Books env file, data directories, Docker Compose stack, Calibre
+admin user, and reader service reconciliation.
 EOF
 }
 
@@ -153,9 +153,6 @@ ensure_docker
 ensure_dirs
 
 compose build
-if [[ ! -f "${BOOKS_HOST_DATA_DIR}/config/state.json" && -f "${BOOKS_HOST_DATA_DIR}/config/accounts.sqlite" ]]; then
-  compose run --rm --no-deps admin node tools/cutover-sqlite-to-json.js
-fi
 compose run --rm --no-deps admin node src/cli.js bootstrap
 compose up -d
 compose run --rm admin node src/cli.js users reconcile || true

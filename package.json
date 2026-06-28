@@ -4,7 +4,7 @@
   "private": true,
   "description": "Neil's self-hosted Books service glue",
   "scripts": {
-    "check": "node --check src/*.js test/*.js tools/*.js",
+    "check": "node --check src/*.js test/*.js",
     "test": "node --test test/*.test.js"
   },
   "engines": {

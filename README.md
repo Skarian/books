@@ -63,9 +63,8 @@ For a rebuild without prompts:
 ```
 
 Onboarding writes `/etc/books/books.env`, creates `/srv/books`, installs Docker
-if needed, builds the runtime image, performs the one-shot SQLite-to-JSON cutover
-if this VM still has the old state file, starts Compose, reconciles users, and
-runs a local health check.
+if needed, builds the runtime image, starts Compose, reconciles users, and runs
+a local health check.
 
 You can also use the helper:
 

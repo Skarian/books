@@ -30,11 +30,10 @@ collections, ratings, or app backups.
 
 ## Account Source Of Truth
 
-Add one runtime account registry outside git, for example:
+This section was the first plan. The implemented app state now lives in
+`/srv/books/config/state.json`; `users.sqlite` is only Calibre's user database.
 
-```text
-/srv/books/config/accounts.sqlite
-```
+The original proposal was one runtime account registry outside git.
 
 The schema/migrations live in git. The data does not.
 
