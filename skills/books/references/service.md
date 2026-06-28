@@ -81,6 +81,9 @@ KOSync server: https://books.example.com/kosync
 ```
 
 Use the same Books username and password for both.
+In Readest, OPDS is under Library -> Import Menu -> Online Library. KOSync is
+under Book Menu -> KOReader Sync after opening a book. Use File Content as the
+Readest checksum method.
 
 ## Imports
 

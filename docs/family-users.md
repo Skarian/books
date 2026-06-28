@@ -1,6 +1,6 @@
 # Family users
 
-The family model is shared books with private reading position.
+The family model is simple: shared books, private reading position.
 
 Each person gets one Books login. They use it for the OPDS catalog and KOSync.
 They still use their own Readest account in the Readest app.
@@ -37,9 +37,9 @@ docker compose run --rm admin users reconcile
 KOSync. `users reconcile` is safe after onboarding, service restarts, or manual
 investigation.
 
-There is no reader-facing dashboard yet. There is also no password reset or
-account suspension command in the current contract. If an account is wrong
-during early development, fix the state deliberately and rerun `users reconcile`.
+There is no reader dashboard yet. There is also no password reset or account
+suspension command in the current contract. If an account is wrong during early
+development, fix the state deliberately and rerun `users reconcile`.
 
 ## Reader handoff
 
@@ -58,22 +58,25 @@ The output shows:
 - Hardcover request note
 
 Send those values out-of-band and point the reader at `docs/reader-setup.md`.
-There is no reader-facing setup website in the current stack.
+Do not send `.env`, Anna keys, Hardcover tokens, Calibre admin credentials, or
+anything from `data/config/secrets.json`. There is no reader setup website in
+the current stack.
 
 ## Reader instructions
 
 In Readest:
 
 1. Sign in with the reader's own Readest account.
-2. Add OPDS Catalogs with `https://books.example.com/catalog`.
+2. Add an OPDS catalog with `https://books.example.com/catalog`.
 3. Use the Books username and password.
-4. Add KOReader Sync with `https://books.example.com/kosync`.
+4. Open a downloaded book and add KOReader Sync with `https://books.example.com/kosync`.
 5. Use the same Books username and password.
 6. Keep the checksum method set to File Content.
 
-Readest's own cloud sync is not the source of truth for this repo. If it copies
+Readest's own cloud sync is not part of the backend contract. If it copies
 settings across devices, that is convenient. If it does not, set up OPDS and
-KOSync on each device.
+KOSync on each device. Credentials sync in Readest is opt-in and requires the
+same sync passphrase on every device.
 
 ## Hardcover
 

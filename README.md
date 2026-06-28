@@ -146,15 +146,16 @@ Print the handoff for the reader:
 docker compose run --rm admin users show alice
 ```
 
-Then send them the values and `docs/reader-setup.md`. They should use:
+Then send them the values and `docs/reader-setup.md`. They need:
 
 - Readest app or `https://web.readest.com/`.
 - Catalog URL: `https://books.example.com/catalog`.
 - KOSync URL: `https://books.example.com/kosync`.
 - The same Books username and password for both integrations.
 
-Readest account sync is not part of the backend contract. Set up OPDS and
-KOSync on each device unless Readest clearly syncs those settings for that user.
+Readest account sync is not part of the backend contract. Catalog URLs may sync
+through Readest, but credentials are opt-in and require a Readest sync
+passphrase. Set up OPDS and KOSync on each device when in doubt.
 
 ## Docs
 
@@ -175,5 +176,7 @@ implementation contract.
 - Calibre content server: https://manual.calibre-ebook.com/server.html
 - `calibre-server` CLI: https://manual.calibre-ebook.com/generated/en/calibre-server.html
 - Readest: https://github.com/readest/readest
+- Readest docs: https://readest.com/docs
+- Readest sync docs: https://readest.com/docs/sync
 - KOReader Sync Server: https://github.com/koreader/koreader-sync-server
 - Anna's Archive MCP/CLI: https://github.com/iosifache/annas-mcp

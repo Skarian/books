@@ -12,5 +12,5 @@ They are not the implementation contract.
 - Use KOReader anywhere it is the better device app.
 - Treat stock Kobo as optional.
 - Use `docker compose run --rm admin users ...` as the owner workflow for now.
-- Preserve reproducibility: installs and config belong in repo scripts and
-  templates, not manual VM state.
+- Preserve reproducibility: installs and config belong in repo files, not manual
+  VM state.

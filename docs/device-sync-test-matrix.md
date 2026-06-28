@@ -1,8 +1,8 @@
 # Device Sync Test Matrix
 
-Use this after `docker compose run --rm admin verify USER` passes locally. The VM can prove
-that the proxy, OPDS auth, and KOSync auth work. Real devices prove whether the
-reading apps agree on the same book identity and location.
+Use this after `docker compose run --rm admin verify USER` passes locally. The
+VM can prove that the proxy, OPDS auth, and KOSync auth work. Real devices prove
+whether the reading apps agree on the same book identity and location.
 
 Test date:
 Tester:
@@ -92,6 +92,10 @@ Do not append `/api`, `/v1`, or `/healthcheck`.
 Landing precision choices: same paragraph, same page, within 1-3 pages, chapter
 start, wrong, failed.
 
+Only reading position is expected to sync through KOSync. Do not treat missing
+bookmarks, notes, highlights, ratings, or collections as failures in this
+matrix.
+
 | From | To | Push works | Pull works | Landing precision | Notes |
 |---|---|---|---|---|---|
 | CrossPoint | Readest Android |  |  |  |  |
@@ -135,4 +139,5 @@ If progress does not move:
 - Confirm Readest uses File Content.
 - Confirm KOReader uses binary matching.
 - Confirm the device can reach `https://books.example.com/kosync`.
+- Confirm each person has a separate Books login.
 - Try the same direction with KOReader, since it is the reference client.

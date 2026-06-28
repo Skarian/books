@@ -28,12 +28,13 @@ docker compose run --rm admin users show USER
 For Readest:
 
 1. Sign in to your Readest account.
-2. Open Settings, then Integrations.
-3. Add the OPDS catalog under Content Sources.
-4. Connect KOReader Sync under Reading Sync.
-5. Leave Checksum Method set to File Content.
-6. Download `Books Sync Fixture` from the catalog. If it is not visible right
+2. Add the OPDS catalog from Import Menu, then Online Library.
+3. Download `Books Sync Fixture` from the catalog. If it is not visible right
    away, search for that exact title.
+4. Open the fixture.
+5. Open Book Menu, then KOReader Sync.
+6. Set the server to `https://books.example.com/kosync`.
+7. Use the same Books login and leave Checksum Method set to File Content.
 
 For KOReader or CrossPoint, add the catalog, download the same fixture book,
 and connect Progress Sync to `https://books.example.com/kosync`.

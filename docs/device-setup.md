@@ -1,14 +1,14 @@
 # Device setup
 
-Books are downloaded from the shared OPDS catalog. Reading position syncs through
-the reader's Books login. Readest itself is not hosted on this VM; use the
-official apps and `https://web.readest.com/`.
+Books come from the shared OPDS catalog. Reading position syncs through KOSync.
+Readest itself is not hosted on this VM; use the official apps or
+`https://web.readest.com/`.
 
 Do not copy random EPUB files between devices if progress matters. Use the OPDS
 download so every app starts from the same canonical file.
 
 KOSync is the progress authority. Do not configure Readest WebDAV for this
-setup. It is a separate sync lane and this repo does not run it.
+library. It is a separate sync lane and this repo does not run it.
 
 ## Credentials
 
@@ -21,7 +21,7 @@ Each reader has one Books username and password. The owner prints it with:
 docker compose run --rm admin users show USER
 ```
 
-Use it for OPDS and KOSync:
+Use that login for OPDS and KOSync:
 
 | Use | URL | Credential |
 |---|---|---|
@@ -49,34 +49,30 @@ before relying on it.
 
 ## Readest Web, Android, iPad, macOS, and Windows
 
-Use Readest on the general-purpose devices.
+Use Readest on the general-purpose devices. Menu labels can vary a little by
+platform, but the two things to find are OPDS catalogs and KOReader Sync.
 
 1. Install Readest, or open `https://web.readest.com/`.
-2. Create a Readest account, or sign in to the account you already use.
-3. Open Settings, then Integrations.
-4. Under Content Sources, open OPDS Catalogs.
-5. Tap Add Catalog.
-6. Add the Calibre/OPDS library at `https://books.example.com/catalog`.
-7. Sign in to the catalog with the reader's Books username and password.
-8. Download the book from the OPDS catalog.
-9. Open Settings, then Integrations again.
-10. Under Reading Sync, open KOReader Sync.
-11. Use `https://books.example.com/kosync`.
-12. Sign in with the same Books username and password.
-13. After it connects, leave Checksum Method set to File Content.
-14. Repeat these steps on each Readest device.
+2. Sign in to a Readest account.
+3. From the library page, open Import Menu, then Online Library.
+4. Add a new OPDS catalog at `https://books.example.com/catalog`.
+5. Sign in to the catalog with the reader's Books username and password.
+6. Browse the catalog and download a book.
+7. Open the downloaded book.
+8. Open Book Menu, then KOReader Sync.
+9. Use `https://books.example.com/kosync`.
+10. Sign in with the same Books username and password.
+11. Set Checksum Method to File Content.
+12. Repeat this on each Readest device.
 
 Do not enter `/api`, `/v1`, or `/healthcheck` after the KOSync URL. The URL is
 exactly `https://books.example.com/kosync`.
 
-Readest exposes OPDS Catalogs and KOReader Sync under Settings, then
-Integrations. Each person enters the same Books username and password in the
-KOReader Sync form. That is user-accessible inside the app; it does not require
-an admin dashboard.
-
-Readest's own account sync is convenient when it works, but this repo does not
-depend on it. If a second device does not show the catalog or KOSync settings,
-enter the same Books login from the owner handoff.
+Readest's account sync is convenient when it works, but this repo does not
+depend on it. Catalog URLs may sync across devices. Catalog and KOSync passwords
+only sync if the reader turns on Readest's optional Credentials sync and enters
+the same sync passphrase on each device. If a device does not show the catalog
+or KOSync settings, enter the Books login again from the owner handoff.
 
 Do not turn on Readest WebDAV. It is not needed for book downloads or progress
 sync, and it can introduce a second progress path.
@@ -103,8 +99,8 @@ Kobo path when shared progress matters more than the stock Kobo interface.
 5. Sign in with the same Books username and password.
 6. Use binary document matching.
 
-KOReader is the reference client for the progress lane, so every sync test should
-include it.
+KOReader is the reference client for the progress lane, so include it in sync
+tests when possible.
 
 ## Kobo
 
@@ -122,6 +118,8 @@ If a book opens in the wrong place on another device, check these first:
 - Readest uses file-content matching.
 - KOReader uses binary matching.
 - Each person uses their own Books login.
+- KOSync only syncs reading position, not notes, highlights, bookmarks, or the
+  book file.
 - Official KOSync is last-write-wins, so a stale device can move progress
   backward if it syncs later.
 - The Calibre EPUB was not re-converted, metadata-written, optimized, or re-zipped

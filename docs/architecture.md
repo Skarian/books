@@ -41,8 +41,8 @@ https://books.example.com
 ```
 
 Reader routes must work without an exe.dev browser session. OPDS uses Calibre
-Basic auth. KOSync uses KOSync auth. There is no reader-facing dashboard or
-setup website.
+Basic auth. KOSync uses KOSync auth. There is no reader dashboard or setup
+website.
 
 Do not configure clients with `/api`, `/v1`, or `/healthcheck` appended to the
 KOSync URL. The client base URL is exactly:
@@ -60,8 +60,8 @@ can create the matching sync account.
 
 ## Accounts
 
-`/srv/books/config/state.json` is the source of truth for readers. Each reader
-has one public login:
+`/srv/books/config/state.json` is the account registry. Each reader has one
+public login:
 
 ```text
 username: alice
