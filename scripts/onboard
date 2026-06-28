@@ -104,7 +104,6 @@ ensure_dirs() {
     install -d -m 0750 "${dir}"
     chown "${BOOKS_UID}:${BOOKS_GID}" "${dir}" 2>/dev/null || true
   done
-  chown -R "${BOOKS_UID}:${BOOKS_GID}" "${BOOKS_HOST_DATA_DIR}/config" "${BOOKS_HOST_DATA_DIR}/library" "${BOOKS_HOST_DATA_DIR}/downloads" "${BOOKS_HOST_DATA_DIR}/import" "${BOOKS_HOST_DATA_DIR}/log" 2>/dev/null || true
   chmod 0770 "${BOOKS_HOST_DATA_DIR}/library" "${BOOKS_HOST_DATA_DIR}/downloads" "${BOOKS_HOST_DATA_DIR}/import" 2>/dev/null || true
 }
 
