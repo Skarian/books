@@ -125,4 +125,4 @@ If a book opens in the wrong place on another device, check these first:
   `https://books.exe.xyz` from inside itself.
 
 If two people see each other's reading position, they are sharing a Books login.
-Rotate the shared login and issue separate accounts.
+Issue separate accounts and stop using the shared login.

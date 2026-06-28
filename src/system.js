@@ -44,47 +44,44 @@ function calibreSetUser(user, password, readonly) {
   run("calibre-server", ["--userdb", config.userDb, "--manage-users", "--", "change_set_password", user, readonly ? "reset" : "set"]);
 }
 
-function calibreRemoveUser(user) {
-  if (calibreUserExists(user)) {
-    run("calibre-server", ["--userdb", config.userDb, "--manage-users", "--", "remove", user], { check: false });
-  }
+async function kosyncAuth(user, rawPassword) {
+  const response = await fetch(`${config.kosyncInternalUrl}/users/auth`, {
+    headers: {
+      Accept: "application/vnd.koreader.v1+json",
+      "x-auth-user": user,
+      "x-auth-key": state.md5(rawPassword)
+    }
+  });
+  return response.ok;
 }
 
-function dockerRedis(args, check = true) {
-  return run("docker", ["exec", config.kosyncContainer, "redis-cli", "-n", "1", ...args], { check });
+async function kosyncCreateUser(user, rawPassword) {
+  if (await kosyncAuth(user, rawPassword)) return;
+  const response = await fetch(`${config.kosyncInternalUrl}/users/create`, {
+    method: "POST",
+    headers: {
+      Accept: "application/vnd.koreader.v1+json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ username: user, password: state.md5(rawPassword) })
+  });
+  if (response.status === 201 && await kosyncAuth(user, rawPassword)) return;
+  const body = await response.text();
+  throw new Error(`KOSync user create failed for ${user}: ${response.status} ${body}`.trim());
 }
 
-function kosyncSetUser(user, rawPassword) {
-  dockerRedis(["SET", `user:${user}:key`, state.md5(rawPassword)]);
+async function reconcileAccount(row) {
+  if (row.status !== "active") return `skipped inactive user ${row.slug}`;
+  calibreSetUser(row.slug, row.books_password, true);
+  await kosyncCreateUser(row.slug, row.books_password);
+  return `reconciled active user ${row.slug}`;
 }
 
-function kosyncDisableUser(user) {
-  dockerRedis(["DEL", `user:${user}:key`], false);
-}
-
-function kosyncPurgeUser(user) {
-  if (!user) return;
-  const result = dockerRedis(["--scan", "--pattern", `user:${user}:*`], false);
-  const keys = result.stdout.split(/\r?\n/).filter(Boolean);
-  if (keys.length) dockerRedis(["DEL", ...keys], false);
-}
-
-function reconcileAccount(row) {
-  const username = row.slug;
-  const password = row.books_password;
-  if (row.status === "active") {
-    calibreSetUser(username, password, true);
-    kosyncSetUser(username, password);
-    return `reconciled active user ${row.slug}`;
-  }
-  calibreRemoveUser(username);
-  kosyncDisableUser(username);
-  return `disabled service access for ${row.slug}`;
-}
-
-function reconcile(slug) {
+async function reconcile(slug) {
   const rows = slug ? [state.getAccount(slug)] : state.listAccounts();
-  return rows.map(reconcileAccount);
+  const output = [];
+  for (const row of rows) output.push(await reconcileAccount(row));
+  return output;
 }
 
 function annas(args, options = {}) {
@@ -96,32 +93,20 @@ function annas(args, options = {}) {
     ANNAS_DOWNLOAD_PATH: config.annasDownloadPath,
     ANNAS_BASE_URL: config.annasBaseUrl
   };
-  return run("runuser", ["-u", "books", "--", "env", ...Object.entries(env)
-    .filter(([key]) => key.startsWith("ANNAS_"))
-    .map(([key, value]) => `${key}=${value}`), config.annasBin, ...args], options);
+  return run(config.annasBin, args, { ...options, env });
 }
 
-function importFiles(files, convert = false) {
+function importFiles(files) {
   ensureDir(config.libraryDir, 0o770);
-  ensureDir(config.importDir, 0o770);
   const passwordDir = fs.mkdtempSync(path.join(os.tmpdir(), "books-calibre-"));
   const passwordFile = path.join(passwordDir, "password");
   fs.writeFileSync(passwordFile, config.calibreAdminPassword, { mode: 0o600 });
-  const libraryUrl = `http://127.0.0.1:${config.calibrePort}/#${config.calibreLibraryId}`;
+  const libraryUrl = `${config.calibreUrl}/#${config.calibreLibraryId}`;
   try {
     for (const input of files) {
       if (!fs.existsSync(input) || !fs.statSync(input).isFile()) throw new Error(`Not a file: ${input}`);
       const extension = path.extname(input).slice(1).toLowerCase();
-      let importFile = input;
-      if (extension !== "epub") {
-        if (!convert) {
-          console.error(`Skipping non-EPUB file without --convert: ${input}`);
-          continue;
-        }
-        const safeName = path.basename(input, path.extname(input)).replace(/[^A-Za-z0-9._ -]+/g, "").trim() || "book";
-        importFile = path.join(config.importDir, `${safeName}.epub`);
-        run("ebook-convert", [input, importFile]);
-      }
+      if (extension !== "epub") throw new Error(`Only EPUB imports are supported: ${input}`);
       run("calibredb", [
         "--with-library", libraryUrl,
         "--username", config.calibreAdminUser,
@@ -130,7 +115,7 @@ function importFiles(files, convert = false) {
         "--automerge", "overwrite",
         "--languages", config.defaultLanguage,
         "--tags", config.defaultTags,
-        importFile
+        input
       ]);
     }
   } finally {
@@ -145,6 +130,17 @@ function writeSyncFixture(output) {
   fs.copyFileSync(fixture, output);
 }
 
+function bootstrap() {
+  ensureDir(config.configDir, 0o750);
+  ensureDir(config.libraryDir, 0o770);
+  ensureDir(config.downloadDir, 0o770);
+  ensureDir(config.importDir, 0o770);
+  ensureDir(config.logDir, 0o750);
+  if (!config.calibreAdminPassword) throw new Error("CALIBRE_ADMIN_PASSWORD is not configured.");
+  calibreSetUser(config.calibreAdminUser, config.calibreAdminPassword, false);
+  run("calibredb", ["--with-library", config.libraryDir, "list"], { check: false });
+}
+
 async function fetchOk(url, options = {}) {
   const response = await fetch(url, options);
   if (!response.ok) throw new Error(`${url} returned ${response.status}`);
@@ -156,61 +152,53 @@ async function health() {
   const user = row ? row.slug : config.calibreAdminUser;
   const password = row ? row.books_password : config.calibreAdminPassword;
   const auth = Buffer.from(`${user}:${password}`).toString("base64");
-  await fetchOk(`http://127.0.0.1:${config.proxyPort}/healthz`);
-  await fetchOk(`http://127.0.0.1:${config.proxyPort}/opds`, { headers: { Authorization: `Basic ${auth}` } });
-  await fetchOk(`http://127.0.0.1:${config.proxyPort}/kosync/healthcheck`, { headers: { Accept: "application/vnd.koreader.v1+json" } });
+  await fetchOk(`${config.localBaseUrl}/healthz`);
+  await fetchOk(`${config.localBaseUrl}/opds`, { headers: { Authorization: `Basic ${auth}` } });
+  await fetchOk(`${config.localBaseUrl}/kosync/healthcheck`, { headers: { Accept: "application/vnd.koreader.v1+json" } });
   return "ok";
 }
 
 async function verify(slug) {
   const row = slug ? state.getAccount(slug) : state.firstActiveAccount();
   if (!row) throw new Error('No active user exists. Create one with ./scripts/books users create "Name" --email person@example.com');
-  const user = row.slug;
-  const password = row.books_password;
-  const basic = Buffer.from(`${user}:${password}`).toString("base64");
-  for (const service of ["books-calibre", "books-node", "books-kosync", "nginx"]) {
-    run("systemctl", ["is-active", "--quiet", service]);
-  }
-  await fetchOk(`http://127.0.0.1:${config.proxyPort}/healthz`);
-  const root = await fetch(`http://127.0.0.1:${config.proxyPort}/`);
+  const basic = Buffer.from(`${row.slug}:${row.books_password}`).toString("base64");
+  await fetchOk(`${config.localBaseUrl}/healthz`);
+  const root = await fetch(`${config.localBaseUrl}/`);
   if (root.status !== 404) throw new Error(`root route returned ${root.status}, expected 404`);
-  const library = await fetch(`http://127.0.0.1:${config.proxyPort}/library`, { redirect: "manual" });
+  const library = await fetch(`${config.localBaseUrl}/library`, { redirect: "manual" });
   if (![301, 302, 307, 308].includes(library.status)) throw new Error(`library route returned ${library.status}, expected redirect`);
-  const setupUnauthed = await fetch(`http://127.0.0.1:${config.proxyPort}/setup/${row.slug}`);
+  const setupUnauthed = await fetch(`${config.localBaseUrl}/setup/${row.slug}`);
   if (setupUnauthed.status !== 401) throw new Error(`setup without auth returned ${setupUnauthed.status}, expected 401`);
-  await fetchOk(`http://127.0.0.1:${config.proxyPort}/setup/${row.slug}`, { headers: { Authorization: `Basic ${basic}` } });
-  await fetchOk(`http://127.0.0.1:${config.proxyPort}/opds`, { headers: { Authorization: `Basic ${basic}` } });
-  await fetchOk(`http://127.0.0.1:${config.proxyPort}/catalog`, { headers: { Authorization: `Basic ${basic}` } });
-  await fetchOk(`http://127.0.0.1:${config.proxyPort}/kosync/healthcheck`, { headers: { Accept: "application/vnd.koreader.v1+json" } });
+  await fetchOk(`${config.localBaseUrl}/setup/${row.slug}`, { headers: { Authorization: `Basic ${basic}` } });
+  await fetchOk(`${config.localBaseUrl}/opds`, { headers: { Authorization: `Basic ${basic}` } });
+  await fetchOk(`${config.localBaseUrl}/catalog`, { headers: { Authorization: `Basic ${basic}` } });
+  await fetchOk(`${config.localBaseUrl}/kosync/healthcheck`, { headers: { Accept: "application/vnd.koreader.v1+json" } });
   const kosyncHeaders = {
     Accept: "application/vnd.koreader.v1+json",
     "Content-Type": "application/json",
-    "x-auth-user": user,
-    "x-auth-key": state.md5(password)
+    "x-auth-user": row.slug,
+    "x-auth-key": state.md5(row.books_password)
   };
-  await fetchOk(`http://127.0.0.1:${config.proxyPort}/kosync/users/auth`, { headers: kosyncHeaders });
+  await fetchOk(`${config.localBaseUrl}/kosync/users/auth`, { headers: kosyncHeaders });
   const doc = "0123456789abcdef0123456789abcdef";
-  await fetchOk(`http://127.0.0.1:${config.proxyPort}/kosync/syncs/progress`, {
+  await fetchOk(`${config.localBaseUrl}/kosync/syncs/progress`, {
     method: "PUT",
     headers: kosyncHeaders,
     body: JSON.stringify({ document: doc, progress: "/body/DocFragment[1]/p[1]", percentage: 0.42, device: "books-verify", device_id: "books-verify" })
   });
-  const progress = await fetchOk(`http://127.0.0.1:${config.proxyPort}/kosync/syncs/progress/${doc}`, { headers: kosyncHeaders });
+  const progress = await fetchOk(`${config.localBaseUrl}/kosync/syncs/progress/${doc}`, { headers: kosyncHeaders });
   const data = await progress.json();
   if (data.document !== doc || Math.abs(Number(data.percentage) - 0.42) > 0.001) {
     throw new Error("KOSync progress verification failed");
   }
-  run("docker", ["image", "inspect", config.kosyncImage]);
   return `ok: local production checks passed for ${row.slug}`;
 }
 
 module.exports = {
   run,
   ensureDir,
+  bootstrap,
   reconcile,
-  kosyncDisableUser,
-  kosyncPurgeUser,
-  calibreRemoveUser,
   annas,
   importFiles,
   writeSyncFixture,

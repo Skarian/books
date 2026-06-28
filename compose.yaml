@@ -1,0 +1,101 @@
+services:
+  proxy:
+    image: nginx:alpine
+    ports:
+      - "${BOOKS_BIND_ADDR:-127.0.0.1}:${BOOKS_PROXY_PORT:-8000}:8000"
+    volumes:
+      - ./config/nginx/compose.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+      - calibre
+      - kosync
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/books/Dockerfile
+      args:
+        CALIBRE_VERSION: "${CALIBRE_VERSION:-9.9.0}"
+        ANNAS_VERSION: "${ANNAS_VERSION:-v0.0.5}"
+    image: books-runtime
+    env_file:
+      - ${BOOKS_ENV_FILE:-/etc/books/books.env}
+    command: ["node", "src/server.js"]
+    volumes:
+      - ${BOOKS_HOST_DATA_DIR:-/srv/books}:/srv/books
+    expose:
+      - "8090"
+    restart: unless-stopped
+
+  calibre:
+    image: books-runtime
+    env_file:
+      - ${BOOKS_ENV_FILE:-/etc/books/books.env}
+    command:
+      - calibre-server
+      - --listen-on
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --enable-auth
+      - --auth-mode=basic
+      - --userdb
+      - /srv/books/config/users.sqlite
+      - --log
+      - /srv/books/log/calibre.log
+      - --access-log
+      - /srv/books/log/calibre-access.log
+      - --max-log-size
+      - "10"
+      - --book-list-mode
+      - details_list
+      - --max-opds-items
+      - "100"
+      - --max-opds-ungrouped-items
+      - "100"
+      - /srv/books/library
+    volumes:
+      - ${BOOKS_HOST_DATA_DIR:-/srv/books}:/srv/books
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  kosync:
+    image: "${KOSYNC_IMAGE:-koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1}"
+    environment:
+      ENABLE_USER_REGISTRATION: "${KOSYNC_ENABLE_REGISTRATION:-true}"
+    volumes:
+      - ${BOOKS_HOST_DATA_DIR:-/srv/books}/kosync/redis:/var/lib/redis
+      - ${BOOKS_HOST_DATA_DIR:-/srv/books}/log/kosync/redis:/var/log/redis
+      - ${BOOKS_HOST_DATA_DIR:-/srv/books}/log/kosync/app:/app/koreader-sync-server/logs
+    expose:
+      - "17200"
+      - "7200"
+    restart: unless-stopped
+
+  worker:
+    image: books-runtime
+    env_file:
+      - ${BOOKS_ENV_FILE:-/etc/books/books.env}
+    command: ["sh", "-lc", "while true; do node src/cli.js hardcover sync; sleep \"$${HARDCOVER_SYNC_INTERVAL_SECONDS:-300}\"; done"]
+    volumes:
+      - ${BOOKS_HOST_DATA_DIR:-/srv/books}:/srv/books
+    depends_on:
+      - app
+      - calibre
+      - kosync
+    restart: unless-stopped
+
+  admin:
+    image: books-runtime
+    profiles: ["admin"]
+    env_file:
+      - ${BOOKS_ENV_FILE:-/etc/books/books.env}
+    volumes:
+      - ${BOOKS_HOST_DATA_DIR:-/srv/books}:/srv/books
+    depends_on:
+      - app
+      - calibre
+      - kosync
+    entrypoint: ["/app/docker/books/entrypoint.sh"]

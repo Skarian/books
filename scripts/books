@@ -2,15 +2,63 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMMAND="${1:-}"
+ENV_FILE="${BOOKS_ENV_FILE:-/etc/books/books.env}"
+COMPOSE=(docker compose --project-name books --project-directory "${ROOT_DIR}" -f "${ROOT_DIR}/compose.yaml")
+[[ -f "${ENV_FILE}" ]] && COMPOSE+=(--env-file "${ENV_FILE}")
 
-case "${COMMAND}" in
-  health|verify|opds-url|kosync-url|proxy-commands|users|hardcover|import|sync-fixture|anna|status|restart)
-    if [[ ${EUID} -ne 0 ]]; then
-      exec sudo -E "$0" "$@"
-    fi
+compose() {
+  "${COMPOSE[@]}" "$@"
+}
+
+case "${1:-}" in
+  setup)
+    shift
+    exec "${ROOT_DIR}/scripts/onboard" "$@"
+    ;;
+  up)
+    shift
+    exec "${COMPOSE[@]}" up -d "$@"
+    ;;
+  down)
+    shift
+    exec "${COMPOSE[@]}" down "$@"
+    ;;
+  restart)
+    shift
+    exec "${COMPOSE[@]}" restart "$@"
+    ;;
+  status)
+    shift
+    exec "${COMPOSE[@]}" ps "$@"
+    ;;
+  logs)
+    shift
+    exec "${COMPOSE[@]}" logs -f "$@"
+    ;;
+  build)
+    shift
+    exec "${COMPOSE[@]}" build "$@"
+    ;;
+  shell)
+    shift
+    exec "${COMPOSE[@]}" run --rm admin sh "$@"
+    ;;
+  ""|-h|--help)
+    cat <<'EOF'
+Usage: ./scripts/books COMMAND [ARGS...]
+
+Service commands:
+  setup             create env/dirs, build, start, bootstrap, reconcile
+  up/down/restart   control the Compose stack
+  status/logs       inspect Compose services
+  build             build the Books runtime image
+  shell             open a shell in the admin container
+
+App commands are run in the admin container:
+  users, hardcover, import, sync-fixture, anna, health, verify, opds-url, kosync-url
+EOF
+    ;;
+  *)
+    exec "${COMPOSE[@]}" run --rm admin node src/cli.js "$@"
     ;;
 esac
-
-export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--no-warnings"
-exec node "${ROOT_DIR}/src/cli.js" "$@"

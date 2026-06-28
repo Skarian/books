@@ -3,50 +3,47 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_DIR=/etc/books
-ENV_FILE="${ENV_DIR}/books.env"
-OPT_DIR=/opt/books
-OPT_BIN="${OPT_DIR}/bin"
-NGINX_CONF=/etc/nginx/conf.d/books.conf
-CALIBRE_SYSTEMD_UNIT=/etc/systemd/system/books-calibre.service
-NODE_SYSTEMD_UNIT=/etc/systemd/system/books-node.service
-KOSYNC_SYSTEMD_UNIT=/etc/systemd/system/books-kosync.service
-HARDCOVER_SYSTEMD_UNIT=/etc/systemd/system/books-hardcover-sync.service
-HARDCOVER_SYSTEMD_TIMER=/etc/systemd/system/books-hardcover-sync.timer
-ORIGINAL_ARGS=("$@")
+ENV_FILE="${BOOKS_ENV_FILE:-${ENV_DIR}/books.env}"
+NON_INTERACTIVE=0
+ENV_KEYS=(
+  BOOKS_PUBLIC_HOST BOOKS_BIND_ADDR BOOKS_PROXY_PORT BOOKS_HOST_DATA_DIR
+  BOOKS_DATA_DIR BOOKS_LIBRARY_DIR BOOKS_DOWNLOAD_DIR BOOKS_IMPORT_DIR
+  BOOKS_LOG_DIR BOOKS_CONFIG_DIR BOOKS_USERDB BOOKS_STATE_FILE
+  BOOKS_CALIBRE_LIBRARY_ID BOOKS_NODE_HOST BOOKS_NODE_PORT BOOKS_LOCAL_BASE_URL
+  CALIBRE_PORT BOOKS_CALIBRE_URL CALIBRE_VERSION CALIBRE_ADMIN_USER
+  CALIBRE_ADMIN_PASSWORD KOSYNC_IMAGE KOSYNC_INTERNAL_URL
+  KOSYNC_ENABLE_REGISTRATION ANNAS_VERSION ANNAS_BASE_URL ANNAS_SECRET_KEY
+  ANNAS_DOWNLOAD_PATH HARDCOVER_DAILY_DOWNLOAD_CAP HARDCOVER_SYNC_INTERVAL_SECONDS
+  BOOKS_DEFAULT_LANGUAGE BOOKS_DEFAULT_TAGS BOOKS_UID BOOKS_GID
+)
 
-if [[ ${EUID} -ne 0 ]]; then
-  exec sudo -E "$0" "${ORIGINAL_ARGS[@]}"
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/onboard [--non-interactive]
+
+Creates the Books env file, data directories, Docker Compose stack, one-shot
+SQLite-to-JSON cutover, Calibre admin user, and reader service reconciliation.
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
 fi
 
-non_interactive=false
-skip_start=false
+if [[ ${EUID} -ne 0 ]]; then
+  exec sudo -E "$0" "$@"
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --non-interactive)
-      non_interactive=true
-      shift
-      ;;
-    --skip-start)
-      skip_start=true
-      shift
-      ;;
     -h|--help)
-      cat <<'EOF'
-Usage: ./scripts/onboard [--non-interactive] [--skip-start]
-
-Installs and configures the Books service:
-  - official Calibre binary
-  - Node app and CLI
-  - Anna's Archive MCP/CLI binary
-  - official KOReader Sync Server
-  - /etc/books/books.env
-  - /srv/books data directories
-  - systemd services for Calibre, Node, KOSync, and Hardcover sync
-  - nginx gate on BOOKS_PROXY_PORT
-  - repo-local Codex books skill symlink
-EOF
+      usage
       exit 0
+      ;;
+    --non-interactive)
+      NON_INTERACTIVE=1
+      shift
       ;;
     *)
       echo "Unknown option: $1" >&2
@@ -68,45 +65,10 @@ rand_secret() {
   LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-24}" || true
 }
 
-ask() {
-  local name="$1" prompt="$2" default="$3" value
-  if [[ "${non_interactive}" == true ]]; then
-    printf -v "${name}" '%s' "${default}"
-    return
-  fi
-  read -r -p "${prompt} [${default}]: " value
-  printf -v "${name}" '%s' "${value:-${default}}"
-}
-
-ask_secret() {
-  local name="$1" prompt="$2" existing="${3:-}" value
-  if [[ "${non_interactive}" == true ]]; then
-    printf -v "${name}" '%s' "${existing:-$(rand_secret)}"
-    return
-  fi
-  if [[ -n "${existing}" ]]; then
-    read -r -s -p "${prompt} [leave blank to keep existing]: " value
-  else
-    read -r -s -p "${prompt} [leave blank to generate]: " value
-    [[ -z "${value}" ]] && value="$(rand_secret)" && echo "Generated ${name}."
-  fi
+prompt_annas_key() {
+  [[ "${NON_INTERACTIVE}" == "1" || -n "${ANNAS_SECRET_KEY:-}" || ! -t 0 ]] && return
+  read -r -s -p "Anna's Archive API key [leave blank to skip for now]: " ANNAS_SECRET_KEY
   echo
-  printf -v "${name}" '%s' "${value:-${existing}}"
-}
-
-ask_optional_secret() {
-  local name="$1" prompt="$2" existing="${3:-}" value
-  if [[ "${non_interactive}" == true ]]; then
-    printf -v "${name}" '%s' "${existing}"
-    return
-  fi
-  if [[ -n "${existing}" ]]; then
-    read -r -s -p "${prompt} [leave blank to keep existing]: " value
-  else
-    read -r -s -p "${prompt} [leave blank to skip for now]: " value
-  fi
-  echo
-  printf -v "${name}" '%s' "${value:-${existing}}"
 }
 
 shell_quote() {
@@ -117,251 +79,90 @@ write_env() {
   install -d -m 0755 "${ENV_DIR}"
   umask 077
   {
-    printf 'BOOKS_PUBLIC_HOST=%s\n' "$(shell_quote "${BOOKS_PUBLIC_HOST}")"
-    printf 'BOOKS_PROXY_PORT=%s\n' "$(shell_quote "${BOOKS_PROXY_PORT}")"
-    printf 'BOOKS_DATA_DIR=%s\n' "$(shell_quote "${BOOKS_DATA_DIR}")"
-    printf 'BOOKS_LIBRARY_DIR=%s\n' "$(shell_quote "${BOOKS_LIBRARY_DIR}")"
-    printf 'BOOKS_DOWNLOAD_DIR=%s\n' "$(shell_quote "${BOOKS_DOWNLOAD_DIR}")"
-    printf 'BOOKS_IMPORT_DIR=%s\n' "$(shell_quote "${BOOKS_IMPORT_DIR}")"
-    printf 'BOOKS_LOG_DIR=%s\n' "$(shell_quote "${BOOKS_LOG_DIR}")"
-    printf 'BOOKS_CONFIG_DIR=%s\n' "$(shell_quote "${BOOKS_CONFIG_DIR}")"
-    printf 'BOOKS_USERDB=%s\n' "$(shell_quote "${BOOKS_USERDB}")"
-    printf 'BOOKS_ACCOUNTS_DB=%s\n' "$(shell_quote "${BOOKS_ACCOUNTS_DB}")"
-    printf 'BOOKS_CALIBRE_LIBRARY_ID=%s\n' "$(shell_quote "${BOOKS_CALIBRE_LIBRARY_ID}")"
-    printf 'BOOKS_NODE_PORT=%s\n' "$(shell_quote "${BOOKS_NODE_PORT}")"
-    printf 'CALIBRE_PORT=%s\n' "$(shell_quote "${CALIBRE_PORT}")"
-    printf 'CALIBRE_VERSION=%s\n' "$(shell_quote "${CALIBRE_VERSION}")"
-    printf 'CALIBRE_ADMIN_USER=%s\n' "$(shell_quote "${CALIBRE_ADMIN_USER}")"
-    printf 'CALIBRE_ADMIN_PASSWORD=%s\n' "$(shell_quote "${CALIBRE_ADMIN_PASSWORD}")"
-    printf 'KOSYNC_PORT=%s\n' "$(shell_quote "${KOSYNC_PORT}")"
-    printf 'KOSYNC_IMAGE=%s\n' "$(shell_quote "${KOSYNC_IMAGE}")"
-    printf 'KOSYNC_CONTAINER=%s\n' "$(shell_quote "${KOSYNC_CONTAINER}")"
-    printf 'KOSYNC_DATA_DIR=%s\n' "$(shell_quote "${KOSYNC_DATA_DIR}")"
-    printf 'KOSYNC_LOG_DIR=%s\n' "$(shell_quote "${KOSYNC_LOG_DIR}")"
-    printf 'KOSYNC_ENABLE_REGISTRATION=%s\n' "$(shell_quote "${KOSYNC_ENABLE_REGISTRATION}")"
-    printf 'ANNAS_VERSION=%s\n' "$(shell_quote "${ANNAS_VERSION}")"
-    printf 'ANNAS_BASE_URL=%s\n' "$(shell_quote "${ANNAS_BASE_URL}")"
-    printf 'ANNAS_SECRET_KEY=%s\n' "$(shell_quote "${ANNAS_SECRET_KEY}")"
-    printf 'ANNAS_DOWNLOAD_PATH=%s\n' "$(shell_quote "${ANNAS_DOWNLOAD_PATH}")"
-    printf 'HARDCOVER_DAILY_DOWNLOAD_CAP=%s\n' "$(shell_quote "${HARDCOVER_DAILY_DOWNLOAD_CAP}")"
-    printf 'BOOKS_DEFAULT_LANGUAGE=%s\n' "$(shell_quote "${BOOKS_DEFAULT_LANGUAGE}")"
-    printf 'BOOKS_DEFAULT_TAGS=%s\n' "$(shell_quote "${BOOKS_DEFAULT_TAGS}")"
+    for key in "${ENV_KEYS[@]}"; do
+      printf '%s=%s\n' "${key}" "$(shell_quote "${!key}")"
+    done
   } > "${ENV_FILE}"
-  chmod 0640 "${ENV_FILE}"
-  chown root:books "${ENV_FILE}" 2>/dev/null || true
+  chmod 0600 "${ENV_FILE}"
 }
 
-ensure_packages() {
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    ca-certificates curl docker.io git jq nginx nodejs sqlite3 wget xdg-utils xz-utils \
-    libxcb-cursor0 libopengl0 zip
-}
-
-ensure_calibre() {
-  local current_version=""
-  if command -v ebook-convert >/dev/null 2>&1; then
-    current_version="$(ebook-convert --version | awk 'NR==1 {gsub(/[()]/, "", $3); print $3}')"
-  fi
-  if [[ -n "${current_version}" && "${current_version}" == "${CALIBRE_VERSION}" ]]; then
+ensure_docker() {
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     return
   fi
-  if [[ -n "${current_version}" ]] && command -v calibre-uninstall >/dev/null 2>&1; then
-    calibre-uninstall || true
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl docker.io docker-compose-v2
   fi
-  wget -nv -O- https://download.calibre-ebook.com/linux-installer.sh | sh /dev/stdin "version=${CALIBRE_VERSION}"
+  docker compose version >/dev/null
 }
 
-annas_asset_suffix() {
-  case "$(uname -m)" in
-    x86_64|amd64) echo "linux_amd64" ;;
-    aarch64|arm64) echo "linux_arm64" ;;
-    armv7l|armv6l) echo "linux_arm" ;;
-    *) echo "Unsupported architecture for annas-mcp: $(uname -m)" >&2; exit 1 ;;
-  esac
-}
-
-ensure_annas_mcp() {
-  install -d -m 0755 "${OPT_BIN}"
-  local version_no_v="${ANNAS_VERSION#v}" suffix asset checksums url tmpdir
-  suffix="$(annas_asset_suffix)"
-  asset="annas-mcp_${version_no_v}_${suffix}.tar.xz"
-  checksums="annas-mcp_${version_no_v}--checksums.txt"
-  url="https://github.com/iosifache/annas-mcp/releases/download/${ANNAS_VERSION}"
-  if [[ -x "${OPT_BIN}/annas-mcp" ]] && "${OPT_BIN}/annas-mcp" --version 2>/dev/null | grep -q "${version_no_v}"; then
-    return
-  fi
-  tmpdir="$(mktemp -d)"
-  curl -fsSLo "${tmpdir}/${asset}" "${url}/${asset}"
-  curl -fsSLo "${tmpdir}/${checksums}" "${url}/${checksums}"
-  (cd "${tmpdir}" && grep "  ${asset}$" "${checksums}" | sha256sum -c -)
-  tar -xJf "${tmpdir}/${asset}" -C "${tmpdir}"
-  install -m 0755 "$(find "${tmpdir}" -type f -name annas-mcp | head -n 1)" "${OPT_BIN}/annas-mcp"
-  touch "${OPT_BIN}/.env"
-  chmod 0644 "${OPT_BIN}/.env"
-  rm -rf "${tmpdir}"
-}
-
-ensure_users_and_dirs() {
-  getent group books >/dev/null || groupadd --system books
-  id books >/dev/null 2>&1 || useradd --system --gid books --home-dir "${BOOKS_DATA_DIR}" --shell /usr/sbin/nologin books
-  [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]] && usermod -aG books "${SUDO_USER}" || true
-
-  install -d -o books -g books -m 0750 "${BOOKS_DATA_DIR}" "${BOOKS_CONFIG_DIR}" "${BOOKS_LOG_DIR}"
-  install -d -o books -g books -m 0750 "${KOSYNC_DATA_DIR}" "${KOSYNC_DATA_DIR}/redis" "${KOSYNC_LOG_DIR}" "${KOSYNC_LOG_DIR}/redis" "${KOSYNC_LOG_DIR}/app"
-  install -d -o books -g books -m 2770 "${BOOKS_LIBRARY_DIR}" "${BOOKS_DOWNLOAD_DIR}" "${BOOKS_IMPORT_DIR}"
-  if [[ ! -f "${BOOKS_LIBRARY_DIR}/metadata.db" ]]; then
-    runuser -u books -- calibredb --with-library "${BOOKS_LIBRARY_DIR}" list >/dev/null
-  fi
-}
-
-ensure_node_app() {
-  npm run check --prefix "${ROOT_DIR}"
-  npm test --prefix "${ROOT_DIR}"
-}
-
-ensure_state_permissions() {
-  local file
-  for file in "${BOOKS_ACCOUNTS_DB}" "${BOOKS_ACCOUNTS_DB}-wal" "${BOOKS_ACCOUNTS_DB}-shm"; do
-    [[ -e "${file}" ]] || continue
-    chown books:books "${file}" 2>/dev/null || true
-    chmod 0660 "${file}" 2>/dev/null || true
+ensure_dirs() {
+  local dir
+  for dir in "${BOOKS_HOST_DATA_DIR}" "${BOOKS_HOST_DATA_DIR}/config" "${BOOKS_HOST_DATA_DIR}/library" "${BOOKS_HOST_DATA_DIR}/downloads" "${BOOKS_HOST_DATA_DIR}/import" "${BOOKS_HOST_DATA_DIR}/log" "${BOOKS_HOST_DATA_DIR}/kosync" "${BOOKS_HOST_DATA_DIR}/kosync/redis"; do
+    install -d -m 0750 "${dir}"
+    chown "${BOOKS_UID}:${BOOKS_GID}" "${dir}" 2>/dev/null || true
   done
+  chmod 0770 "${BOOKS_HOST_DATA_DIR}/library" "${BOOKS_HOST_DATA_DIR}/downloads" "${BOOKS_HOST_DATA_DIR}/import" 2>/dev/null || true
 }
 
-calibre_user_exists() {
-  calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- list | grep -Fxq "$1"
-}
-
-ensure_calibre_user() {
-  local user="$1" password="$2" readonly="$3" can_change_password="$4"
-  if calibre_user_exists "${user}"; then
-    calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- chpass "${user}" "${password}"
-  else
-    if [[ "${readonly}" == "set" ]]; then
-      calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- add "${user}" "${password}" --readonly
-    else
-      calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- add "${user}" "${password}"
-    fi
-  fi
-  calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- readonly "${user}" "${readonly}"
-  calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- change_set_password "${user}" "${can_change_password}"
-}
-
-ensure_calibre_userdb() {
-  ensure_calibre_user "${CALIBRE_ADMIN_USER}" "${CALIBRE_ADMIN_PASSWORD}" reset set
-  if [[ -n "${CALIBRE_OPDS_USER:-}" && "${CALIBRE_OPDS_USER}" != "${CALIBRE_ADMIN_USER}" ]]; then
-    calibre-server --userdb "${BOOKS_USERDB}" --manage-users -- remove "${CALIBRE_OPDS_USER}" >/dev/null 2>&1 || true
-  fi
-  chown books:books "${BOOKS_USERDB}"
-  chmod 0660 "${BOOKS_USERDB}"
-}
-
-render_template() {
-  local src="$1" dest="$2" tmp
-  tmp="$(mktemp)"
-  sed \
-    -e "s|__BOOKS_PROXY_PORT__|${BOOKS_PROXY_PORT}|g" \
-    -e "s|__BOOKS_NODE_PORT__|${BOOKS_NODE_PORT}|g" \
-    -e "s|__CALIBRE_PORT__|${CALIBRE_PORT}|g" \
-    -e "s|__KOSYNC_PORT__|${KOSYNC_PORT}|g" \
-    "${src}" > "${tmp}"
-  install -m 0644 "${tmp}" "${dest}"
-  rm -f "${tmp}"
-}
-
-retire_removed_services() {
-  systemctl disable --now books-calibre-web.service >/dev/null 2>&1 || true
-  systemctl disable --now books-portal.service >/dev/null 2>&1 || true
-  rm -f /etc/systemd/system/books-calibre-web.service /etc/systemd/system/books-portal.service
-  rm -f /opt/books/bin/books-users /opt/books/bin/books-portal /opt/books/bin/books-hardcover-sync /opt/books/bin/books-import /opt/books/bin/books-sync-fixture /opt/books/bin/books-annas
-}
-
-ensure_kosync_image() {
-  systemctl enable --now docker >/dev/null 2>&1 || true
-  docker pull "${KOSYNC_IMAGE}"
-}
-
-install_services() {
-  install -m 0644 "${ROOT_DIR}/config/systemd/books-calibre.service" "${CALIBRE_SYSTEMD_UNIT}"
-  install -m 0644 "${ROOT_DIR}/config/systemd/books-node.service" "${NODE_SYSTEMD_UNIT}"
-  install -m 0644 "${ROOT_DIR}/config/systemd/books-kosync.service" "${KOSYNC_SYSTEMD_UNIT}"
-  install -m 0644 "${ROOT_DIR}/config/systemd/books-hardcover-sync.service" "${HARDCOVER_SYSTEMD_UNIT}"
-  install -m 0644 "${ROOT_DIR}/config/systemd/books-hardcover-sync.timer" "${HARDCOVER_SYSTEMD_TIMER}"
-  render_template "${ROOT_DIR}/config/nginx/books.conf.template" "${NGINX_CONF}"
-  [[ -L /etc/nginx/sites-enabled/default ]] && rm -f /etc/nginx/sites-enabled/default
-  systemctl daemon-reload
-  nginx -t
-  if [[ "${skip_start}" != true ]]; then
-    systemctl enable books-calibre books-node books-kosync books-hardcover-sync.timer nginx
-    systemctl restart books-calibre books-node books-kosync
-    systemctl restart books-hardcover-sync.timer
-    systemctl enable --now nginx
-    systemctl reload nginx
-  fi
-}
-
-install_skill() {
-  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    runuser -u "${SUDO_USER}" -- "${ROOT_DIR}/scripts/install-skill" || true
-  fi
+compose() {
+  docker compose --project-name books --project-directory "${ROOT_DIR}" -f "${ROOT_DIR}/compose.yaml" --env-file "${ENV_FILE}" "$@"
 }
 
 load_existing_env
 
-ask BOOKS_PUBLIC_HOST "Public host" "${BOOKS_PUBLIC_HOST:-books.exe.xyz}"
-ask BOOKS_PROXY_PORT "Local nginx proxy port" "${BOOKS_PROXY_PORT:-8000}"
-ask BOOKS_DATA_DIR "Data directory" "${BOOKS_DATA_DIR:-/srv/books}"
-
+BOOKS_PUBLIC_HOST="${BOOKS_PUBLIC_HOST:-books.example.com}"
+BOOKS_BIND_ADDR="${BOOKS_BIND_ADDR:-127.0.0.1}"
+BOOKS_PROXY_PORT="${BOOKS_PROXY_PORT:-8000}"
+BOOKS_HOST_DATA_DIR="${BOOKS_HOST_DATA_DIR:-/srv/books}"
+BOOKS_DATA_DIR="${BOOKS_DATA_DIR:-/srv/books}"
 BOOKS_LIBRARY_DIR="${BOOKS_LIBRARY_DIR:-${BOOKS_DATA_DIR}/library}"
 BOOKS_DOWNLOAD_DIR="${BOOKS_DOWNLOAD_DIR:-${BOOKS_DATA_DIR}/downloads}"
 BOOKS_IMPORT_DIR="${BOOKS_IMPORT_DIR:-${BOOKS_DATA_DIR}/import}"
 BOOKS_LOG_DIR="${BOOKS_LOG_DIR:-${BOOKS_DATA_DIR}/log}"
 BOOKS_CONFIG_DIR="${BOOKS_CONFIG_DIR:-${BOOKS_DATA_DIR}/config}"
 BOOKS_USERDB="${BOOKS_USERDB:-${BOOKS_CONFIG_DIR}/users.sqlite}"
-BOOKS_ACCOUNTS_DB="${BOOKS_ACCOUNTS_DB:-${BOOKS_CONFIG_DIR}/accounts.sqlite}"
+BOOKS_STATE_FILE="${BOOKS_STATE_FILE:-${BOOKS_CONFIG_DIR}/state.json}"
 BOOKS_CALIBRE_LIBRARY_ID="${BOOKS_CALIBRE_LIBRARY_ID:-library}"
+BOOKS_NODE_HOST="${BOOKS_NODE_HOST:-0.0.0.0}"
 BOOKS_NODE_PORT="${BOOKS_NODE_PORT:-8090}"
-
-ask CALIBRE_PORT "Calibre localhost port" "${CALIBRE_PORT:-8080}"
-ask CALIBRE_VERSION "Calibre version" "${CALIBRE_VERSION:-9.9.0}"
-ask CALIBRE_ADMIN_USER "Calibre admin user" "${CALIBRE_ADMIN_USER:-books_admin}"
-ask_secret CALIBRE_ADMIN_PASSWORD "Calibre admin password" "${CALIBRE_ADMIN_PASSWORD:-}"
-ask ANNAS_VERSION "Anna's Archive MCP version" "${ANNAS_VERSION:-v0.0.5}"
-ask ANNAS_BASE_URL "Anna's Archive mirror host" "${ANNAS_BASE_URL:-annas-archive.li}"
-ask_optional_secret ANNAS_SECRET_KEY "Anna's Archive API key" "${ANNAS_SECRET_KEY:-}"
-
+BOOKS_LOCAL_BASE_URL="${BOOKS_LOCAL_BASE_URL:-http://proxy:8000}"
+CALIBRE_PORT="${CALIBRE_PORT:-8080}"
+BOOKS_CALIBRE_URL="${BOOKS_CALIBRE_URL:-http://calibre:8080}"
+CALIBRE_VERSION="${CALIBRE_VERSION:-9.9.0}"
+CALIBRE_ADMIN_USER="${CALIBRE_ADMIN_USER:-books_admin}"
+CALIBRE_ADMIN_PASSWORD="${CALIBRE_ADMIN_PASSWORD:-$(rand_secret 32)}"
+KOSYNC_IMAGE="${KOSYNC_IMAGE:-koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1}"
+KOSYNC_INTERNAL_URL="${KOSYNC_INTERNAL_URL:-http://kosync:17200}"
+KOSYNC_ENABLE_REGISTRATION="${KOSYNC_ENABLE_REGISTRATION:-true}"
+ANNAS_VERSION="${ANNAS_VERSION:-v0.0.5}"
+ANNAS_BASE_URL="${ANNAS_BASE_URL:-annas-archive.li}"
+ANNAS_SECRET_KEY="${ANNAS_SECRET_KEY:-}"
 ANNAS_DOWNLOAD_PATH="${ANNAS_DOWNLOAD_PATH:-${BOOKS_DOWNLOAD_DIR}}"
-HARDCOVER_DAILY_DOWNLOAD_CAP="${HARDCOVER_DAILY_DOWNLOAD_CAP:-15}"
+HARDCOVER_DAILY_DOWNLOAD_CAP="${HARDCOVER_DAILY_DOWNLOAD_CAP:-10}"
+HARDCOVER_SYNC_INTERVAL_SECONDS="${HARDCOVER_SYNC_INTERVAL_SECONDS:-300}"
 BOOKS_DEFAULT_LANGUAGE="${BOOKS_DEFAULT_LANGUAGE:-eng}"
 BOOKS_DEFAULT_TAGS="${BOOKS_DEFAULT_TAGS:-agent-imported}"
-KOSYNC_PORT="${KOSYNC_PORT:-7200}"
-KOSYNC_IMAGE="${KOSYNC_IMAGE:-koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1}"
-[[ "${KOSYNC_IMAGE}" == "koreader/kosync:latest" ]] && KOSYNC_IMAGE="koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1"
-KOSYNC_CONTAINER="${KOSYNC_CONTAINER:-books-kosync}"
-KOSYNC_DATA_DIR="${KOSYNC_DATA_DIR:-${BOOKS_DATA_DIR}/kosync}"
-KOSYNC_LOG_DIR="${KOSYNC_LOG_DIR:-${BOOKS_LOG_DIR}/kosync}"
-KOSYNC_ENABLE_REGISTRATION="${KOSYNC_ENABLE_REGISTRATION:-false}"
+BOOKS_UID="${BOOKS_UID:-1000}"
+BOOKS_GID="${BOOKS_GID:-1000}"
+prompt_annas_key
 
 write_env
-ensure_packages
-ensure_calibre
-ensure_users_and_dirs
-ensure_node_app
-ensure_annas_mcp
-retire_removed_services
-ensure_kosync_image
-ensure_calibre_userdb
-NODE_OPTIONS=--no-warnings "${ROOT_DIR}/scripts/books" users init
-ensure_state_permissions
-install_services
-NODE_OPTIONS=--no-warnings "${ROOT_DIR}/scripts/books" users reconcile || true
-ensure_state_permissions
-install_skill
+ensure_docker
+ensure_dirs
+
+compose build
+if [[ ! -f "${BOOKS_HOST_DATA_DIR}/config/state.json" && -f "${BOOKS_HOST_DATA_DIR}/config/accounts.sqlite" ]]; then
+  compose run --rm --no-deps admin node tools/cutover-sqlite-to-json.js
+fi
+compose run --rm --no-deps admin node src/cli.js bootstrap
+compose up -d
+compose run --rm admin node src/cli.js users reconcile || true
+compose run --rm admin node src/cli.js health
 
 echo "Books service configured."
-echo "Local health: http://127.0.0.1:${BOOKS_PROXY_PORT}/healthz"
+echo "Local health: http://${BOOKS_BIND_ADDR}:${BOOKS_PROXY_PORT}/healthz"
 echo "Readest Web URL: https://web.readest.com/"
-echo "Catalog URL for setup pages: https://${BOOKS_PUBLIC_HOST}/catalog"
-echo "KOSync URL for progress: https://${BOOKS_PUBLIC_HOST}/kosync"
-echo "Run ./scripts/books proxy-commands for the documented exe.dev share commands."
+echo "Catalog URL: https://${BOOKS_PUBLIC_HOST}/catalog"
+echo "KOSync URL: https://${BOOKS_PUBLIC_HOST}/kosync"

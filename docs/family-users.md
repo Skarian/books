@@ -1,49 +1,47 @@
-# Family Users
+# Family users
 
 The family model is shared books with private reading position.
 
 Each person gets one Books login. They use it for the setup page, the OPDS
 catalog, and KOSync. They still use their own Readest account in the Readest app.
 
-## Account Shape
+## Account shape
 
 Each user has:
 
 - display name
 - slug, such as `neil` or `alice`
 - optional email, for owner reference
-- status: active or disabled
 - Books username
 - Books passphrase
 - optional Hardcover token
 
-The account database is:
+The account file is:
 
 ```text
-/srv/books/config/accounts.sqlite
+/srv/books/config/state.json
 ```
 
-That database is runtime state. Back it up with `/srv/books`.
+That file is runtime state. Back it up with `/srv/books`.
 
-## Owner Commands
+## Owner commands
 
 ```bash
 ./scripts/books users list
 ./scripts/books users create "Alice" --email alice@example.com
 ./scripts/books users show alice
-./scripts/books users rotate alice all
-./scripts/books users disable alice
-./scripts/books users purge alice --yes
 ./scripts/books users reconcile
 ```
 
-`disable` revokes Calibre and KOSync access but keeps the row. `purge` removes
-the account row and KOSync state for that user.
+`users create` creates the state row, then reconciles that user into Calibre and
+KOSync. `users reconcile` is safe after onboarding, service restarts, or manual
+investigation.
 
-`reconcile` rebuilds Calibre and KOSync users from SQLite. It is safe to run
-after onboarding, service restarts, or manual investigation.
+There is no reader-facing dashboard yet. There is also no password reset or
+account suspension command in the current contract. If an account is wrong
+during early development, fix the state deliberately and rerun `users reconcile`.
 
-## Setup Pages
+## Setup pages
 
 Each setup page is protected by that user's Books login:
 
@@ -58,12 +56,11 @@ The page shows:
 - OPDS catalog URL
 - KOSync URL
 - Hardcover request note
-- the sync fixture test
 
 It must not show owner credentials, Anna API keys, local ports, Redis paths,
-systemd details, `/srv/books`, or `/etc/books/books.env`.
+container internals, `/srv/books`, or `/etc/books/books.env`.
 
-## Reader Instructions
+## Reader instructions
 
 In Readest:
 
@@ -87,9 +84,8 @@ printf '%s\n' 'Bearer ...' | ./scripts/books hardcover set-token alice
 ./scripts/books hardcover status alice
 ```
 
-After that, the five-minute timer processes the user's Want to Read backlog. A
-fulfilled book is imported into Calibre and moved to Currently Reading in
-Hardcover.
+After that, the worker processes the user's Want to Read backlog. A fulfilled
+book is imported into Calibre and moved to Currently Reading in Hardcover.
 
 Hardcover tokens are user-scoped. Neil's token cannot read Alice's shelves, and
 Alice's token cannot read Neil's shelves.

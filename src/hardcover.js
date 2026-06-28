@@ -42,11 +42,8 @@ async function wantToRead(token) {
         user_books(where: {status_id: {_eq: 1}}, order_by: {created_at: asc}, limit: 100) {
           id
           book_id
-          created_at
           book {
-            id
             title
-            slug
             contributions { author { name } }
           }
         }
@@ -134,8 +131,9 @@ function downloadAndImport(candidate, filename) {
     downloaded = true;
   }
   if (!fs.existsSync(downloadPath)) throw new Error(`Anna download completed but ${downloadPath} was not found.`);
-  system.importFiles([downloadPath], false);
-  return { downloadPath, downloaded };
+  if (downloaded) state.incrementDaily();
+  system.importFiles([downloadPath]);
+  return downloadPath;
 }
 
 async function syncUser(row, options = {}) {
@@ -148,49 +146,24 @@ async function syncUser(row, options = {}) {
     const title = (book.title || "").trim();
     const author = authors(book);
     if (!title) continue;
-    const existing = state.hardcoverRequest(row.slug, userBook.id);
-    if (existing && existing.status === "fulfilled") continue;
     if (config.hardcoverDailyDownloadCap > 0 && state.dailyCount() >= config.hardcoverDailyDownloadCap) {
       console.log(`Daily Anna download cap reached: ${state.dailyCount()}/${config.hardcoverDailyDownloadCap}`);
       break;
     }
-    console.log(`${row.slug}: searching ${title}${author ? ` by ${author}` : ""}`);
-    const candidate = findCandidate(title, author);
-    if (options.dryRun) {
-      console.log(`dry-run candidate: ${candidate.hash} ${candidate.format} ${candidate.language} ${candidate.title}`);
-      processedCount += 1;
-      continue;
-    }
     try {
-      state.saveHardcoverRequest(row.slug, userBook, {
-        title,
-        author,
-        status: "downloading",
-        selected_md5: candidate.hash,
-        selected_title: candidate.title,
-        selected_format: candidate.format,
-        selected_language: candidate.language
-      });
+      console.log(`${row.slug}: searching ${title}${author ? ` by ${author}` : ""}`);
+      const candidate = findCandidate(title, author);
+      if (options.dryRun) {
+        console.log(`dry-run candidate: ${candidate.hash} ${candidate.format} ${candidate.language} ${candidate.title}`);
+        processedCount += 1;
+        continue;
+      }
       const filename = safeFilename(`${title} - ${author || "Unknown"} - hardcover-${userBook.id}`);
-      const { downloadPath, downloaded } = downloadAndImport(candidate, filename);
-      if (downloaded) state.incrementDaily();
+      downloadAndImport(candidate, filename);
       await moveToCurrentlyReading(row.hardcover_token, userBook.id);
-      state.saveHardcoverRequest(row.slug, userBook, {
-        title,
-        author,
-        status: "fulfilled",
-        selected_md5: candidate.hash,
-        selected_title: candidate.title,
-        selected_format: candidate.format,
-        selected_language: candidate.language,
-        download_path: downloadPath,
-        imported_at: state.now(),
-        moved_at: state.now()
-      });
       console.log(`fulfilled: ${title}`);
       processedCount += 1;
     } catch (error) {
-      state.saveHardcoverRequest(row.slug, userBook, { title, author, status: "error", error: error.message });
       console.error(`error: ${title}: ${error.message}`);
       processedCount += 1;
     }

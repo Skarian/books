@@ -1,4 +1,6 @@
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 const config = require("./config");
 const state = require("./state");
 
@@ -14,6 +16,7 @@ a{color:#166157;text-decoration:none}a:hover{text-decoration:underline}
 .button{display:inline-block;background:#1f5f55;color:#fff;padding:10px 14px;border-radius:6px;border:0;font-weight:650;margin-top:10px}.button:hover{text-decoration:none;background:#184c44}
 ol{padding-left:20px}li,p{line-height:1.5}@media(max-width:720px){.wrap{padding:16px}.hero h1{font-size:26px}}
 `;
+const setupTemplate = fs.readFileSync(path.join(__dirname, "..", "config", "setup-page.html"), "utf8");
 
 function esc(value) {
   return String(value == null ? "" : value)
@@ -24,11 +27,7 @@ function esc(value) {
 }
 
 function send(res, status, headers, body = "") {
-  res.writeHead(status, {
-    "Cache-Control": "no-store",
-    "Referrer-Policy": "no-referrer",
-    ...headers
-  });
+  res.writeHead(status, { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", ...headers });
   res.end(body);
 }
 
@@ -59,47 +58,17 @@ function parseBasicAuth(req) {
 }
 
 function setupPage(row) {
-  const hardcover = row.hardcover_token && row.hardcover_username
+  const hardcover_note = row.hardcover_token && row.hardcover_username
     ? `<p>Book requests use Hardcover. Add a book to Want to Read in Hardcover account <span class="code">${esc(row.hardcover_username)}</span>; the server checks every five minutes.</p>`
-    : "<p>Book requests use Hardcover. Ask Neil to connect your Hardcover account before using Want to Read as your request list.</p>";
-  return `
-    <div class="top"><div class="brand">Neil's Books for ${esc(row.display_name)}</div><div class="muted">shared books, private reading place</div></div>
-    <section class="hero">
-      <h1>Start here</h1>
-      <p>Use this one Books login for the catalog and reading-position sync. Readest still has its own account.</p>
-      <div class="grid">
-        <div class="field"><b>Username</b><span>${esc(row.slug)}</span></div>
-        <div class="field"><b>Password</b><span>${esc(row.books_password)}</span></div>
-      </div>
-      <a class="button" href="https://web.readest.com/">Open Readest</a>
-    </section>
-    <section class="card">
-      <h2>Add the catalog</h2>
-      <ol>
-        <li>Open Readest, then Settings, then Integrations.</li>
-        <li>Open OPDS Catalogs and add the catalog below.</li>
-        <li>Use the Books username and password from this page.</li>
-      </ol>
-      <div class="field"><b>Catalog URL</b><span>https://${esc(config.publicHost)}/catalog</span></div>
-    </section>
-    <section class="card">
-      <h2>Turn on progress sync</h2>
-      <ol>
-        <li>Open KOReader Sync in Readest integrations.</li>
-        <li>Use the server below with the same Books username and password.</li>
-        <li>Leave Checksum Method set to File Content.</li>
-      </ol>
-      <div class="field"><b>KOSync server</b><span>https://${esc(config.publicHost)}/kosync</span></div>
-    </section>
-    <section class="card">
-      <h2>Book requests</h2>
-      ${hardcover}
-    </section>
-    <section class="card">
-      <h2>Test sync once</h2>
-      <p>Open <b>Books Sync Fixture</b> from the catalog on two devices. Move to Sync marker three on one device, sync, then pull progress on the other device.</p>
-    </section>
-  `;
+    : "<p>Book requests use Hardcover. Ask the server owner to connect your Hardcover account before using Want to Read as your request list.</p>";
+  const values = {
+    display_name: esc(row.display_name),
+    slug: esc(row.slug),
+    books_password: esc(row.books_password),
+    public_host: esc(config.publicHost),
+    hardcover_note
+  };
+  return setupTemplate.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] || "");
 }
 
 function handleSetup(req, res, slug) {
@@ -141,8 +110,8 @@ function createServer() {
 }
 
 if (require.main === module) {
-  createServer().listen(config.nodePort, "127.0.0.1", () => {
-    console.log(`books-node listening on 127.0.0.1:${config.nodePort}`);
+  createServer().listen(config.nodePort, config.nodeHost, () => {
+    console.log(`books app listening on ${config.nodeHost}:${config.nodePort}`);
   });
 }
 

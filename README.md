@@ -1,21 +1,25 @@
 # Books service
 
-This repo runs Neil's self-hosted book backend on `books.exe.xyz`.
+This repo runs a small self-hosted book backend. Calibre stores the EPUBs and
+serves OPDS. KOSync stores reading position. Readers use the official Readest
+apps or `https://web.readest.com/`. Hardcover Want to Read can act as the
+request list.
 
-It is deliberately small. Calibre stores the books and serves OPDS. KOSync stores
-reading position. Readers use the official Readest apps or
-`https://web.readest.com/`. Hardcover Want to Read can act as the request list.
+Git recreates the machine shape. Books, passwords, API keys, and sync state stay
+outside git.
 
-The repo is the source of truth for installs and config. Books, passwords, API
-keys, and sync state stay outside git.
+## What runs
 
-## What Runs Here
+The active deployment is Docker Compose:
 
-- `nginx` listens on `BOOKS_PROXY_PORT` for the documented exe.dev HTTPS proxy.
-- `books-calibre` runs `calibre-server` on localhost.
-- `books-kosync` runs the pinned official KOReader Sync Server container.
-- `books-node` serves `/healthz` and per-user setup pages.
-- `books-hardcover-sync.timer` checks configured Hardcover accounts every five minutes.
+- `proxy`: nginx on `BOOKS_BIND_ADDR:BOOKS_PROXY_PORT`.
+- `app`: Node setup pages and health checks.
+- `calibre`: `calibre-server` with OPDS and downloads.
+- `kosync`: pinned official KOReader Sync Server image.
+- `worker`: Hardcover intake loop, every five minutes by default.
+- `admin`: one-shot CLI container used by `./scripts/books`.
+
+There is no Calibre-Web service and no local reader UI. Compose is the app stack.
 
 Public routes:
 
@@ -23,49 +27,58 @@ Public routes:
 - `/opds`: the same catalog, kept for clients that expect the Calibre path.
 - `/get/...`: Calibre downloads.
 - `/kosync`: KOReader-compatible progress sync.
-- `/setup/<user>`: setup instructions for one reader, protected by that reader's Books login.
+- `/setup/<user>`: setup page for one reader, protected by that reader's Books login.
 - `/library`: redirect to hosted Readest Web.
 
-Everything else returns 404. There is no Calibre-Web service and no local reader
-UI exposed by this VM.
+Everything else returns 404. Public KOSync account creation is blocked; user
+creation goes through the owner CLI.
 
-## Runtime State
+## Runtime state
 
 These paths are created by onboarding and are not committed:
 
 - `/etc/books/books.env`: secrets, API keys, paths, ports.
 - `/srv/books/library`: Calibre library.
 - `/srv/books/downloads`: Anna downloads and sync fixture copies.
-- `/srv/books/import`: temporary conversion/import files.
-- `/srv/books/log`: service logs.
-- `/srv/books/config/accounts.sqlite`: family users, credentials, Hardcover tokens, request history.
+- `/srv/books/import`: temporary import files.
+- `/srv/books/log`: container logs written by the services.
+- `/srv/books/config/state.json`: readers, Books passwords, Hardcover tokens, daily counters.
 - `/srv/books/config/users.sqlite`: Calibre user database.
 - `/srv/books/kosync`: KOSync Redis state.
 
 Back up `/etc/books/books.env` and `/srv/books` if you care about the live
-library and user state. Git recreates the machine shape, not the books.
+library and user state.
 
-## Fresh VM Setup
+## Fresh setup
 
 ```bash
 cd /home/exedev/books
 ./scripts/onboard
 ```
 
-For a rebuild with generated passwords and no prompts:
+For a rebuild without prompts:
 
 ```bash
 ./scripts/onboard --non-interactive
 ```
 
-Onboarding installs Calibre, Anna's Archive MCP, Docker, KOSync, nginx config,
-systemd units, and the repo-local `$books` Codex skill. The Node app has no
-runtime package dependencies.
-It also removes the old Calibre-Web and portal units if they exist.
+Onboarding writes `/etc/books/books.env`, creates `/srv/books`, installs Docker
+if needed, builds the runtime image, performs the one-shot SQLite-to-JSON cutover
+if this VM still has the old state file, starts Compose, reconciles users, and
+runs a local health check.
 
-## exe.dev Proxy
+You can also use the helper:
 
-Run these from your local machine, not inside the VM:
+```bash
+./scripts/books setup
+```
+
+## Deployment address
+
+The public host is not hardcoded. Set `BOOKS_PUBLIC_HOST` in
+`/etc/books/books.env` when this runs somewhere other than `books.exe.xyz`.
+
+For exe.dev, expose the loopback proxy from your local machine:
 
 ```bash
 ssh exe.dev share port books 8000
@@ -79,16 +92,19 @@ ssh exe.dev share set-private books
 ```
 
 The VM cannot call its own public `books.exe.xyz` endpoint. Local checks use
-`127.0.0.1:${BOOKS_PROXY_PORT}` through nginx.
+`BOOKS_LOCAL_BASE_URL`, which defaults to the proxy container inside Compose.
 
-## Owner Commands
+For a homelab, keep `BOOKS_BIND_ADDR=127.0.0.1` and point your normal reverse
+proxy at `127.0.0.1:8000`, or change the bind address deliberately.
+
+## Owner commands
 
 ```bash
 ./scripts/books status
 ./scripts/books health
 ./scripts/books verify neil
 ./scripts/books restart
-./scripts/books proxy-commands
+./scripts/books logs
 ```
 
 Users:
@@ -97,8 +113,6 @@ Users:
 ./scripts/books users list
 ./scripts/books users create "Alice" --email alice@example.com
 ./scripts/books users show alice
-./scripts/books users rotate alice all
-./scripts/books users disable alice
 ./scripts/books users reconcile
 ```
 
@@ -109,7 +123,6 @@ Books:
 
 ```bash
 ./scripts/books import /path/to/book.epub
-./scripts/books import --convert /path/to/book.pdf
 ./scripts/books sync-fixture
 ./scripts/books anna book-search "title author epub english"
 ./scripts/books anna book-download MD5_HASH filename.epub
@@ -128,10 +141,10 @@ printf '%s\n' 'Bearer ...' | ./scripts/books hardcover set-token neil
 
 The sync loop reads Want to Read, looks for an English EPUB through Anna's
 Archive, imports a match into Calibre, then moves the Hardcover item to
-Currently Reading. Anna's member download cap is global for the VM and defaults
-to 15 downloads per UTC day.
+Currently Reading. The automatic intake cap is global for the VM and defaults to
+10 downloaded files per UTC day.
 
-## Reader Setup
+## Reader setup
 
 Give each reader their setup page:
 
@@ -151,7 +164,7 @@ KOSync on each device unless Readest clearly syncs those settings for that user.
 
 ## Docs
 
-- `docs/architecture.md`: how the services fit together.
+- `docs/architecture.md`: how the containers fit together.
 - `docs/device-setup.md`: reader app setup.
 - `docs/real-device-sync-test.md`: physical-device sync check.
 - `docs/family-users.md`: user lifecycle and per-user credentials.

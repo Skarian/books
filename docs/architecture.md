@@ -1,8 +1,9 @@
 # Architecture
 
-Books is a small service bundle for `books.exe.xyz`.
+Books is a small Compose stack for a shared EPUB library with per-reader
+progress sync.
 
-The design is intentionally plain:
+The design is plain:
 
 - Calibre owns book files, metadata, OPDS, and downloads.
 - KOSync owns reading position.
@@ -12,6 +13,20 @@ The design is intentionally plain:
 
 No local web reader, dashboard, or Calibre-Web instance is part of the default
 build.
+
+## Containers
+
+`compose.yaml` defines the stack:
+
+- `proxy`: nginx, bound to `BOOKS_BIND_ADDR:BOOKS_PROXY_PORT`.
+- `app`: Node HTTP service for `/setup/<user>` and `/healthz`.
+- `calibre`: `calibre-server` with Basic auth and OPDS.
+- `kosync`: official KOReader Sync Server image pinned by digest.
+- `worker`: periodic `hardcover sync`.
+- `admin`: CLI container used by `./scripts/books`.
+
+The app, Calibre, worker, and admin containers mount `/srv/books`. The KOSync
+container mounts its Redis data under `/srv/books/kosync`.
 
 ## Routes
 
@@ -23,7 +38,7 @@ https://books.exe.xyz
   /kosync        -> KOReader Sync Server, prefix stripped by nginx
   /setup/<user>  -> Node setup page for that user
   /library       -> redirect to https://web.readest.com/
-  /healthz       -> local service health
+  /healthz       -> app health
   /              -> 404
 ```
 
@@ -41,10 +56,14 @@ https://books.exe.xyz/kosync
 Nginx strips `/kosync` before proxying. For example,
 `/kosync/users/auth` reaches upstream `/users/auth`.
 
+Public `/kosync/users/create` is blocked. The KOSync container keeps
+registration enabled internally so `./scripts/books users create` can create the
+matching sync account.
+
 ## Accounts
 
-`/srv/books/config/accounts.sqlite` is the source of truth for readers. Each
-active reader has one public login:
+`/srv/books/config/state.json` is the source of truth for readers. Each reader
+has one public login:
 
 ```text
 username: neil
@@ -57,12 +76,11 @@ That login works for:
 - `/catalog`
 - `/kosync`
 
-The same SQLite database also stores Hardcover tokens and fulfillment history.
+The same JSON file stores Hardcover tokens and the VM-wide daily download count.
 Secrets stay out of git.
 
 `./scripts/books users reconcile` pushes account state into Calibre and KOSync.
-It does not rotate passwords. Rotation happens only through
-`./scripts/books users rotate USER all`.
+It does not change existing Books passwords.
 
 ## Progress
 
@@ -79,21 +97,22 @@ each device.
 KOSync is last-write-wins. One stale device can move progress backward, so family
 members must not share a Books login.
 
-## Hardcover Intake
+## Hardcover intake
 
-For a configured user, the timer runs every five minutes:
+For each configured user, the worker runs every five minutes:
 
 1. Read that user's Hardcover Want to Read list.
 2. Search Anna's Archive for an English EPUB.
-3. Download and import the match into Calibre.
+3. Download and import a match into Calibre.
 4. Move the Hardcover item to Currently Reading.
-5. Record the result in SQLite.
+5. Increment the VM-wide daily download count.
 
-The Anna download cap is global for the VM. It is not per user.
+The automatic intake cap defaults to 10 downloaded files per UTC day for the
+whole VM. It is not per user.
 
-## Runtime State
+## Runtime state
 
-Git contains scripts, schemas, templates, systemd units, nginx config, and docs.
+Git contains the Compose file, Dockerfile, scripts, proxy config, and docs.
 
 Runtime state lives here:
 
@@ -102,7 +121,8 @@ Runtime state lives here:
 - `/srv/books/downloads`
 - `/srv/books/import`
 - `/srv/books/log`
-- `/srv/books/config`
+- `/srv/books/config/state.json`
+- `/srv/books/config/users.sqlite`
 - `/srv/books/kosync`
 
 Restore flow:
@@ -117,15 +137,3 @@ Restore flow:
 
 No required restore step should live only in shell history or a manual edit under
 `/etc`.
-
-## Services
-
-- `books-calibre.service`
-- `books-kosync.service`
-- `books-node.service`
-- `books-hardcover-sync.service`
-- `books-hardcover-sync.timer`
-- `nginx`
-
-The old `books-calibre-web.service` and `books-portal.service` are retired by
-onboarding.

@@ -1,7 +1,7 @@
 # Device Sync Test Matrix
 
 Use this after `./scripts/books verify USER` passes locally. The VM can prove
-that nginx, OPDS auth, and KOSync auth work. Real devices prove whether the
+that the proxy, OPDS auth, and KOSync auth work. Real devices prove whether the
 reading apps agree on the same book identity and location.
 
 Test date:
@@ -122,9 +122,8 @@ Use the same fixture with two different Books users.
 |---|---|---|---|
 | Create user | One Books login is created |  |  |
 | Reconcile users | Calibre and KOSync users are rebuilt without rotating passwords |  |  |
-| Rotate login | New password works, old password fails |  |  |
-| Disable user | Setup, OPDS, and KOSync auth fail |  |  |
-| Purge user | Account row and KOSync user state are removed |  |  |
+| Show user | Owner can recover the one Books login |  |  |
+| Public KOSync registration | `/kosync/users/create` returns 404 |  |  |
 | Setup page privacy | User sees only their own credentials |  |  |
 | Setup page caching | Page sends no-store headers |  |  |
 

@@ -1,0 +1,31 @@
+<section class="top">
+  <div class="brand">Books</div>
+  <div class="muted">Private reading setup for {{display_name}}</div>
+</section>
+
+<section class="hero">
+  <h1>Set up Readest</h1>
+  <p>Use hosted Readest and connect this server for catalog access and reading progress sync.</p>
+  <a class="button" href="https://web.readest.com/">Open Readest Web</a>
+</section>
+
+<section class="grid">
+  <div class="card">
+    <h2>Login</h2>
+    <div class="field"><b>Username</b><span>{{slug}}</span></div>
+    <div class="field"><b>Password</b><span>{{books_password}}</span></div>
+  </div>
+  <div class="card">
+    <h2>OPDS catalog</h2>
+    <div class="field"><b>URL</b><span>https://{{public_host}}/catalog</span></div>
+  </div>
+  <div class="card">
+    <h2>KOSync</h2>
+    <div class="field"><b>Server</b><span>https://{{public_host}}/kosync</span></div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Book requests</h2>
+  {{hardcover_note}}
+</section>

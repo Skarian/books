@@ -1,4 +1,4 @@
-# Books Service Reference
+# Books service reference
 
 ## Layout
 
@@ -8,32 +8,33 @@
 - Downloads: `/srv/books/downloads`
 - Import staging: `/srv/books/import`
 - Logs: `/srv/books/log`
-- Accounts: `/srv/books/config/accounts.sqlite`
+- Accounts: `/srv/books/config/state.json`
 - Calibre users: `/srv/books/config/users.sqlite`
 - KOSync state: `/srv/books/kosync`
-- Public host: `books.exe.xyz`
+- Default public host: `books.exe.xyz`
 
-Services:
+Compose services:
 
-- `books-calibre`
-- `books-kosync`
-- `books-node`
-- `books-hardcover-sync.timer`
-- `nginx`
+- `proxy`
+- `app`
+- `calibre`
+- `kosync`
+- `worker`
+- `admin`
 
 ## Routing
 
-Nginx listens on `BOOKS_PROXY_PORT`.
+The proxy container listens on `BOOKS_PROXY_PORT`.
 
 - `/catalog`, `/opds`, and `/get/...` go to Calibre.
 - `/kosync` goes to KOSync with the prefix stripped.
+- `/kosync/users/create` is blocked publicly.
 - `/setup/<user>` goes to the Node app and uses that user's Books login.
 - `/library` redirects to `https://web.readest.com/`.
 - `/healthz` goes to the Node app.
 - `/` returns 404.
 
-The VM cannot call its own public `books.exe.xyz` endpoint. Use local nginx for
-checks:
+The VM cannot call its own public `books.exe.xyz` endpoint. Use local checks:
 
 ```bash
 ./scripts/books health
@@ -48,6 +49,9 @@ ssh exe.dev share set-public books
 ssh exe.dev share set-private books
 ```
 
+For homelab deployment, set `BOOKS_PUBLIC_HOST` and point your normal reverse
+proxy at `127.0.0.1:8000` unless you deliberately change `BOOKS_BIND_ADDR`.
+
 ## Users
 
 Each reader gets one Books login. It works for setup, OPDS, and KOSync.
@@ -56,16 +60,13 @@ Each reader gets one Books login. It works for setup, OPDS, and KOSync.
 ./scripts/books users list
 ./scripts/books users create "Name" --email person@example.com
 ./scripts/books users show USER
-./scripts/books users rotate USER all
-./scripts/books users disable USER
-./scripts/books users purge USER --yes
 ./scripts/books users reconcile
 ```
 
 Run `users reconcile` after onboarding or account changes if Calibre/KOSync state
 looks stale.
 
-## Reader Setup
+## Reader setup
 
 Tell readers to use hosted Readest:
 
@@ -88,7 +89,6 @@ Prefer English EPUBs.
 
 ```bash
 ./scripts/books import /path/to/book.epub
-./scripts/books import --convert /path/to/book.pdf
 ./scripts/books sync-fixture
 ```
 
@@ -97,7 +97,7 @@ imports `Books Sync Fixture` into Calibre.
 
 ## Anna's Archive MCP
 
-The installed binary is `/opt/books/bin/annas-mcp`.
+The installed binary is `/opt/books/bin/annas-mcp` inside the runtime image.
 
 Use it through the repo helper so env vars come from `/etc/books/books.env`:
 
@@ -109,7 +109,7 @@ Use it through the repo helper so env vars come from `/etc/books/books.env`:
 Respect copyright and terms. Ask before downloading when authorization is not
 clear.
 
-## Hardcover Intake
+## Hardcover intake
 
 Configure a token per user:
 
@@ -117,9 +117,8 @@ Configure a token per user:
 printf '%s\n' 'Bearer ...' | ./scripts/books hardcover set-token USER
 ./scripts/books hardcover status USER
 ./scripts/books hardcover sync --dry-run --user USER --limit 1
-./scripts/books hardcover sync --user USER
 ```
 
-The timer checks Want to Read every five minutes, imports fulfilled EPUBs into
-Calibre, and moves fulfilled Hardcover items to Currently Reading. The Anna cap
-is global for the VM.
+The worker checks Want to Read every five minutes, imports fulfilled EPUBs into
+Calibre, and moves fulfilled Hardcover items to Currently Reading. The automatic
+download cap is global for the VM and defaults to 10 files per UTC day.
