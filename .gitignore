@@ -14,6 +14,7 @@ library/
 .DS_Store
 *.swp
 *.tmp
+AGENTS.md
 
 # Python/cache noise
 __pycache__/

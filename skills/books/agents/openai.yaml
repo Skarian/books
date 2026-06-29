@@ -1,4 +1,0 @@
-interface:
-  display_name: "Books"
-  short_description: "Operate a personal Calibre EPUB service."
-  default_prompt: "Use $books to find, stage, import, or manage EPUBs in my Calibre service."
