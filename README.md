@@ -1,56 +1,53 @@
 # Books service
 
-A self-hosted EPUB library built from a small Docker Compose stack.
+This repo runs a small self-hosted book backend. Calibre stores the EPUBs and
+serves OPDS. KOSync stores reading position. Readers use the official Readest
+apps or `https://web.readest.com/`. Hardcover Want to Read can act as the
+request list.
 
-- Calibre stores the books and serves OPDS.
-- KOSync stores reading position.
-- Readest, KOReader, CrossPoint, and other OPDS readers connect to the same
-  catalog.
-- Hardcover Want to Read can feed automatic imports through Anna's Archive.
+Git recreates the machine shape. Books, passwords, API keys, and sync state stay
+outside git.
 
-The repo recreates the service. The library, passwords, API keys, and reading
-state live outside git.
+## What runs
 
-## Services
-
-`compose.yaml` defines five services:
+The active deployment is Docker Compose:
 
 - `proxy`: nginx on `BOOKS_BIND_ADDR:BOOKS_PROXY_PORT`.
-- `calibre`: Calibre content server with OPDS and downloads.
-- `kosync`: KOReader Sync Server.
+- `calibre`: `calibre-server` with OPDS and downloads.
+- `kosync`: pinned official KOReader Sync Server image.
 - `worker`: Hardcover intake loop, every five minutes by default.
-- `admin`: one-shot CLI container for setup and operator commands.
+- `admin`: one-shot CLI container for owner commands.
 
 Public routes:
 
 - `/catalog`: OPDS catalog for Readest, CrossPoint, KOReader, and other readers.
-- `/opds`: Calibre's OPDS path.
-- `/get/...`: book downloads from Calibre.
+- `/opds`: the same catalog, kept for clients that expect the Calibre path.
+- `/get/...`: Calibre downloads.
 - `/kosync`: KOReader-compatible progress sync.
 - `/library`: redirect to hosted Readest Web.
-- `/healthz`: nginx health check.
+- `/healthz`: simple nginx health check.
 
-## Runtime State
+User creation goes through the owner CLI.
 
-`bootstrap` creates the runtime files and directories:
+## Runtime state
 
-- `.env`: host and operator settings.
+`bootstrap` creates these runtime paths:
+
+- `.env`: operator config.
 - `secrets/annas_secret_key`: Anna's Archive API key.
-- `data/config/secrets.json`: generated Calibre admin secret.
-- `data/config/state.json`: reader accounts, Books passwords, Hardcover tokens,
-  and daily intake counters.
-- `data/config/users.sqlite`: Calibre user database.
+- `data/config/secrets.json`: generated internal Calibre admin secret.
 - `data/library`: Calibre library.
-- `data/downloads`: Anna downloads before import.
-- `data/import`: manual import drop folder.
+- `data/downloads`: Anna downloads.
+- `data/import`: temporary import files.
+- `data/log`: container logs written by the services.
+- `data/config/state.json`: readers, Books passwords, Hardcover tokens, daily counters.
+- `data/config/users.sqlite`: Calibre user database.
 - `data/kosync`: KOSync Redis state.
-- `data/log`: container logs.
 
-Back up `.env`, `secrets/annas_secret_key`, and the data directory.
+Back up `.env`, `secrets/annas_secret_key`, and the configured data directory if
+you care about the live library, API keys, and user state.
 
-## Fresh Setup
-
-Install Docker with the Compose plugin first.
+## Fresh setup
 
 ```bash
 cd /home/exedev/books
@@ -67,9 +64,13 @@ docker compose run --rm admin health
 docker compose run --rm admin users create "Alice" --email alice@example.com
 ```
 
-Set `BOOKS_PUBLIC_HOST` in `.env` to the host readers will use.
+Install Docker and Docker Compose before running the stack. Keep `.env` and
+`secrets/annas_secret_key` private.
 
-## Deployment
+## Deployment address
+
+Set `BOOKS_PUBLIC_HOST` in `.env` to the host readers will use. The examples use
+`books.example.com`.
 
 For exe.dev, expose the loopback proxy from your local machine:
 
@@ -84,24 +85,22 @@ Return to private mode:
 ssh exe.dev share set-private books
 ```
 
-For a homelab, leave `BOOKS_BIND_ADDR=127.0.0.1` and point your reverse proxy
-at `127.0.0.1:8000`, or change the bind address deliberately.
-
-Use the internal Compose proxy for checks from the VM:
+Use the internal Compose proxy for local checks:
 
 ```bash
 docker compose run --rm admin health
 ```
 
-## Operator Commands
+For a homelab, keep `BOOKS_BIND_ADDR=127.0.0.1` and point your normal reverse
+proxy at `127.0.0.1:8000`, or change the bind address deliberately.
 
-Stack:
+## Owner commands
 
 ```bash
 docker compose ps
-docker compose logs -f
-docker compose restart
 docker compose run --rm admin health
+docker compose restart
+docker compose logs -f
 ```
 
 Users:
@@ -113,16 +112,16 @@ docker compose run --rm admin users show alice
 docker compose run --rm admin users reconcile
 ```
 
-Each reader gets one Books username and one Diceware-style passphrase. That
-same login works for OPDS and KOSync.
+Each reader gets one Books username and one dice-roll-style passphrase. That
+same login works for their OPDS catalog and KOSync progress.
 
-Manual import:
+Books:
 
 ```bash
 docker compose run --rm admin import /srv/books/import/book.epub
 ```
 
-Only import books you are allowed to access.
+Only use acquisition tools for books you are allowed to access.
 
 Hardcover intake:
 
@@ -133,28 +132,36 @@ docker compose run --rm admin hardcover sync --dry-run --user alice --limit 1
 docker compose run --rm admin hardcover sync --user alice
 ```
 
-The worker reads Want to Read, searches Anna's Archive for an English EPUB,
-imports a match into Calibre, then moves the Hardcover item to Currently
-Reading. The automatic intake cap defaults to 10 downloaded files per UTC day
-for the whole VM.
+The sync loop reads Want to Read, looks for an English EPUB through Anna's
+Archive, imports a match into Calibre, then moves the Hardcover item to
+Currently Reading. The automatic intake cap is global for the VM and defaults to
+10 downloaded files per UTC day.
 
-## Reader Handoff
+## Reader setup
 
-Print a reader's setup values:
+Print the handoff for the reader:
 
 ```bash
 docker compose run --rm admin users show alice
 ```
 
-Send that output with `docs/reader-setup.md`. A reader needs:
+Then send them the values and `docs/reader-setup.md`. They need:
 
 - Readest app or `https://web.readest.com/`.
 - Catalog URL: `https://books.example.com/catalog`.
 - KOSync URL: `https://books.example.com/kosync`.
-- Their Books username and password.
+- The same Books username and password for both integrations.
 
-See `docs/device-setup.md` for device notes and `docs/multiple-users.md` for
-multi-user operation.
+Readest may sync catalog URLs across devices. Credentials sync in Readest is
+opt-in and requires a Readest sync passphrase. Set up OPDS and KOSync on each
+device when in doubt.
+
+## Docs
+
+- `docs/architecture.md`: how the containers fit together.
+- `docs/reader-setup.md`: short setup guide to send to a reader.
+- `docs/device-setup.md`: reader app setup.
+- `docs/multiple-users.md`: multiple readers and per-user credentials.
 
 ## References
 
