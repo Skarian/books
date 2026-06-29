@@ -56,6 +56,12 @@ function requireArg(value, message) {
   return value;
 }
 
+function positiveInteger(value, message) {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 1) throw new Error(message);
+  return number;
+}
+
 async function reconcile(user) {
   for (const line of await system.reconcile(user)) console.log(line);
 }
@@ -119,7 +125,7 @@ async function hardcoverCommand(args) {
       const arg = args.shift();
       if (arg === "--user") options.user = requireArg(args.shift(), "Missing --user value.");
       else if (arg === "--dry-run") options.dryRun = true;
-      else if (arg === "--limit") options.limit = Number(requireArg(args.shift(), "Missing --limit value."));
+      else if (arg === "--limit") options.limit = positiveInteger(requireArg(args.shift(), "Missing --limit value."), "--limit must be a positive integer.");
       else throw new Error(`Unknown hardcover sync option: ${arg}`);
     }
     await hardcover.sync(options);

@@ -52,7 +52,7 @@ docker compose run --rm admin users reconcile
 docker compose run --rm admin users reconcile alice
 ```
 
-`reconcile` pushes account state from `data/config/state.json` into Calibre and KOSync. It creates accounts that are missing and updates passwords to match the state file. Run it after restoring from backup, after manual edits to the state file, or to confirm that Calibre and KOSync are in sync with Books state.
+`reconcile` pushes account state from `data/config/state.json` into Calibre, creates missing KOSync users, and verifies that KOSync accepts each user's Books login. Run it after restoring from backup, after manual edits to the state file, or to confirm that Calibre and KOSync are in sync with Books state.
 
 ## Import an EPUB manually
 

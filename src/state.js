@@ -19,6 +19,13 @@ function md5(value) {
 function slugify(value) {
   const slug = String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
   if (!slug) throw new Error("Could not derive a slug from that name.");
+  return validateSlug(slug.replace(/-$/g, ""));
+}
+
+function validateSlug(slug) {
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(String(slug || ""))) {
+    throw new Error("Slugs must use lowercase letters, numbers, and single hyphens with no leading or trailing hyphen.");
+  }
   return slug;
 }
 
@@ -100,7 +107,7 @@ function updateAccount(slug, values) {
 }
 
 function createAccount({ name, slug, email }) {
-  const finalSlug = slug || slugify(name);
+  const finalSlug = slug ? validateSlug(slug) : slugify(name);
   return mutate((data) => {
     if (account(data, finalSlug)) throw new Error(`Account already exists: ${finalSlug}`);
     const timestamp = now();

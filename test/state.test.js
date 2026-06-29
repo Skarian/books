@@ -32,3 +32,16 @@ test("fresh state file initializes and persists the Books data model", () => {
   assert.equal(reloaded.dailyCount(), 1);
   assert.deepEqual(Object.keys(reloaded.readState()).sort(), ["accounts", "hardcover_daily_downloads", "version"]);
 });
+
+test("explicit account slugs must match the service username shape", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-test-"));
+  const state = loadState(dir);
+
+  assert.equal(state.createAccount({ name: "Alice Example" }).slug, "alice-example");
+  for (const slug of ["bad slug", "UPPER", "trail-", "-lead", "two--hyphens", "../slash"]) {
+    assert.throws(
+      () => state.createAccount({ name: "Bad", slug }),
+      /Slugs must use lowercase letters/
+    );
+  }
+});

@@ -179,7 +179,12 @@ async function sync(options = {}) {
       console.log(`${row.slug}: no Hardcover token configured`);
       continue;
     }
-    total += await syncUser(row, options);
+    try {
+      total += await syncUser(row, options);
+    } catch (error) {
+      console.error(`error: ${row.slug}: ${error.message}`);
+      if (options.user) throw error;
+    }
   }
   console.log(`processed ${total} item(s)`);
 }
