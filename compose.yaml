@@ -1,6 +1,8 @@
 services:
   proxy:
     image: nginx:alpine
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "${BOOKS_BIND_ADDR:-127.0.0.1}:${BOOKS_PROXY_PORT:-8000}:8000"
     volumes:
@@ -15,6 +17,8 @@ services:
       context: .
       dockerfile: docker/books/Dockerfile
     image: books-runtime
+    security_opt:
+      - no-new-privileges:true
     command:
       - calibre-server
       - --listen-on
@@ -46,6 +50,8 @@ services:
 
   kosync:
     image: koreader/kosync@sha256:bb3f13615365703315a43b9059f65e71e876440f867e23a42bf27f2fa18264e1
+    security_opt:
+      - no-new-privileges:true
     environment:
       ENABLE_USER_REGISTRATION: "true"
     volumes:
@@ -59,6 +65,8 @@ services:
 
   worker:
     image: books-runtime
+    security_opt:
+      - no-new-privileges:true
     env_file:
       - .env
     command: ["sh", "-lc", "while true; do node src/cli.js hardcover sync; sleep 300; done"]
@@ -73,6 +81,8 @@ services:
 
   admin:
     image: books-runtime
+    security_opt:
+      - no-new-privileges:true
     profiles: ["admin"]
     env_file:
       - .env
