@@ -1,8 +1,8 @@
-# Family users
+# Multiple users
 
-The family model is simple: shared books, private reading position.
+The multi-user model is simple: shared books, private reading position.
 
-Each person gets one Books login. They use it for the OPDS catalog and KOSync.
+Each reader gets one Books login. They use it for the OPDS catalog and KOSync.
 They still use their own Readest account in the Readest app.
 
 ## Account shape
@@ -92,7 +92,7 @@ account.
 
 ## Rules
 
-- Give each person a separate Books login.
+- Give each reader a separate Books login.
 - Use `users reconcile` to update Calibre and KOSync users.
 - Keep secrets out of git.
 - Use hosted Readest as the reader.

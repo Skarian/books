@@ -158,8 +158,7 @@ device when in doubt.
 - `docs/architecture.md`: how the containers fit together.
 - `docs/reader-setup.md`: short setup guide to send to a reader.
 - `docs/device-setup.md`: reader app setup.
-- `docs/real-device-sync-test.md`: physical-device sync check.
-- `docs/family-users.md`: user lifecycle and per-user credentials.
+- `docs/multiple-users.md`: multiple readers and per-user credentials.
 
 ## References
 

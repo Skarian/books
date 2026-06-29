@@ -88,8 +88,8 @@ Progress identity depends on the reader app's KOReader-compatible file content
 hash. The practical rule is simple: download the same EPUB from `/catalog` on
 each device.
 
-KOSync is last-write-wins. Give family members separate Books logins so their
-progress stays separate.
+KOSync is last-write-wins. Give readers separate Books logins so their progress
+stays separate.
 
 ## Hardcover intake
 
