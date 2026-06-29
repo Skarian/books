@@ -43,8 +43,8 @@ Use CrossPoint on the X4.
 6. Enter the same Books username and password.
 
 If CrossPoint exposes document matching, choose binary or file-content matching.
-If that option is hidden, validate the X4 with `docs/device-sync-test-matrix.md`
-before relying on it.
+If that option is hidden, test the X4 against another synced device before
+relying on it.
 
 ## Readest Web, Android, iPad, macOS, and Windows
 

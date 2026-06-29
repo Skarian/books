@@ -68,16 +68,6 @@ Fail:
 - It asks for credentials again or fails to connect.
 - It syncs to someone else's place.
 
-## 5. Record the result
-
-Write the result into `docs/device-sync-test-matrix.md`. Use plain notes:
-
-```text
-Readest Web -> KOReader Desktop: pass, landed at the same section.
-Readest iPad -> CrossPoint: limited pass, landed at chapter start.
-CrossPoint -> Readest Android: fail, opened at beginning.
-```
-
 If a test fails, check these before changing the architecture:
 
 - Both devices downloaded the same book from `https://books.example.com/catalog`.

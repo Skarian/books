@@ -160,9 +160,6 @@ device when in doubt.
 - `docs/device-setup.md`: reader app setup.
 - `docs/real-device-sync-test.md`: physical-device sync check.
 - `docs/family-users.md`: user lifecycle and per-user credentials.
-- `docs/device-sync-test-matrix.md`: device test checklist.
-
-Research notes live under `docs/research/`.
 
 ## References
 
