@@ -1,6 +1,6 @@
-# Reader setup
+# Reader Setup
 
-Ask the server owner for these three values:
+Ask the server operator for:
 
 ```text
 Books username: USER
@@ -8,39 +8,32 @@ Books password: PASSWORD
 Server host: SERVER_HOST
 ```
 
-Your Readest account is separate from your Books login. Use the Books username
-and password for the catalog and for reading sync.
-
-The two server URLs are:
+Use the Books login for the catalog and for progress sync. Your Readest account
+is separate.
 
 ```text
-Catalog: https://SERVER_HOST/catalog
-KOSync:  https://SERVER_HOST/kosync
+Catalog URL: https://SERVER_HOST/catalog
+KOSync URL:  https://SERVER_HOST/kosync
 ```
-
-The KOSync URL is exactly `https://SERVER_HOST/kosync`.
 
 ## Readest
 
-Use the official Readest apps or `https://web.readest.com/`.
+Use the Readest app or `https://web.readest.com/`.
 
 1. Sign in to your Readest account.
-2. On the library page, open Import Menu, then Online Library.
-3. Add a new OPDS catalog with `https://SERVER_HOST/catalog`.
-4. Enter your Books username and password if Readest asks for them.
-5. Browse the catalog and download a book.
-6. Open that book.
+2. Open Import Menu, then Online Library.
+3. Add `https://SERVER_HOST/catalog` as an OPDS catalog.
+4. Sign in to the catalog with your Books username and password.
+5. Download a book from the catalog.
+6. Open the book.
 7. Open Book Menu, then KOReader Sync.
-8. Use `https://SERVER_HOST/kosync`.
-9. Enter the same Books username and password.
+8. Set the server to `https://SERVER_HOST/kosync`.
+9. Sign in with the same Books username and password.
 10. Set Checksum Method to File Content.
 
-Repeat the setup on each Readest device. Readest can sync saved catalog URLs
-between signed-in devices. Passwords only sync if you turn on Readest's optional
-Credentials sync and use the same sync passphrase on every device. If that feels
-fussy, set up each device by hand.
-
-Books come from OPDS. Progress comes from KOSync.
+Repeat this on each Readest device. Readest may sync catalog settings between
+devices. Password sync depends on Readest's optional Credentials sync and the
+same Readest sync passphrase on every device.
 
 ## KOReader and CrossPoint
 
@@ -52,24 +45,26 @@ Books come from OPDS. Progress comes from KOSync.
 
 Use binary or file-content document matching if the app exposes that setting.
 
-## What syncs
-
-KOSync syncs reading position only. Book files, bookmarks, highlights, notes,
-ratings, and collections stay in the reader app. Download the book from the
-catalog on each device, then let KOSync handle position.
-
 ## Requests
 
-If the owner connected your Hardcover account, add books to Want to Read in
+If the operator connected your Hardcover account, add books to Want to Read in
 Hardcover. The server checks that list every five minutes and imports a matching
-English EPUB when it can.
+English EPUB when one is available.
 
-## Quick fixes
+## What Syncs
+
+KOSync syncs reading position only. Book files, bookmarks, highlights, notes,
+ratings, and collections stay in the reader app.
+
+Download the book from the catalog on each device. Progress should then follow
+through KOSync.
+
+## Quick Fixes
 
 - OPDS returns 401 or 403: check the Books username and password.
 - Catalog fails to load: use `https://SERVER_HOST/catalog`.
-- KOSync fails to connect: use exactly `https://SERVER_HOST/kosync`.
-- Progress stays put: confirm both devices downloaded the same book from the
-  catalog and use the same Books login.
-- Someone else's progress appears: you are sharing a Books login. Ask the owner
-  for separate accounts.
+- KOSync fails to connect: use `https://SERVER_HOST/kosync`.
+- Progress does not move: confirm both devices downloaded the same catalog copy
+  and use the same Books login.
+- Another reader's progress appears: ask the operator for separate Books
+  accounts.
