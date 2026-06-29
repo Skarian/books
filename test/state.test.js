@@ -20,15 +20,15 @@ function loadState(dir) {
 test("fresh state file initializes and persists the Books data model", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-test-"));
   const state = loadState(dir);
-  const row = state.createAccount({ name: "Neil", slug: "neil", email: "neil@example.com" });
-  assert.equal(row.slug, "neil");
+  const row = state.createAccount({ name: "Alice", slug: "alice", email: "alice@example.com" });
+  assert.equal(row.slug, "alice");
   assert.match(row.books_password, /^[a-z]+(-[a-z]+){5}$/);
-  state.updateAccount("neil", { books_password: "beacon-forest-river-window" });
+  state.updateAccount("alice", { books_password: "beacon-forest-river-window" });
   state.incrementDaily();
 
   resetModules();
   const reloaded = require("../src/state");
-  assert.equal(reloaded.getAccount("neil").books_password, "beacon-forest-river-window");
+  assert.equal(reloaded.getAccount("alice").books_password, "beacon-forest-river-window");
   assert.equal(reloaded.dailyCount(), 1);
   assert.deepEqual(Object.keys(reloaded.readState()).sort(), ["accounts", "hardcover_daily_downloads", "version"]);
 });
