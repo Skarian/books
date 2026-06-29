@@ -35,7 +35,7 @@ RUN set -eux; \
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 COPY . .
 RUN chmod +x /app/src/cli.js /app/docker/books/entrypoint.sh

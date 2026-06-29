@@ -1,15 +1,8 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const generatePassphrase = require("eff-diceware-passphrase");
 const config = require("./config");
-
-const WORDS = `
-amber anchor apple autumn baker beacon bridge bright cabin cedar cherry circle
-clear coffee comet cotton creek crystal daily delta desert ember engine feather
-forest garden gentle golden harbor honest island lantern maple meadow mellow
-mirror morning native ocean orange pepper planet pocket quiet river silver
-simple steady summer sunset temple timber valley velvet window winter wonder
-`.trim().split(/\s+/);
 
 function now() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
@@ -30,7 +23,10 @@ function slugify(value) {
 }
 
 function passphrase() {
-  return Array.from({ length: 4 }, () => WORDS[crypto.randomInt(WORDS.length)]).join("-");
+  for (;;) {
+    const words = generatePassphrase(6);
+    if (words.every((word) => /^[a-z]+$/.test(word))) return words.join("-");
+  }
 }
 
 function blank() {

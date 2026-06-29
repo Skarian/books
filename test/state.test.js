@@ -22,6 +22,7 @@ test("fresh state file initializes and persists the Books data model", () => {
   const state = loadState(dir);
   const row = state.createAccount({ name: "Neil", slug: "neil", email: "neil@example.com" });
   assert.equal(row.slug, "neil");
+  assert.match(row.books_password, /^[a-z]+(-[a-z]+){5}$/);
   state.updateAccount("neil", { books_password: "beacon-forest-river-window" });
   state.incrementDaily();
 
