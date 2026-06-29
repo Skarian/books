@@ -1,118 +1,89 @@
 # Device setup
 
-Books come from the shared OPDS catalog. Reading position syncs through KOSync.
-Use the official Readest apps or `https://web.readest.com/`.
+Books come from the shared OPDS catalog. Reading position syncs through KOSync. The two URLs are:
 
-Download each book from OPDS on every device so each app starts from the same
-canonical file.
-
-KOSync is the progress authority. Book downloads use OPDS; reading position uses
-KOSync.
-
-## Credentials
-
-Examples use `books.example.com`. Replace it with the value of
-`BOOKS_PUBLIC_HOST` from `.env`.
-
-Each reader has one Books username and password. The owner prints it with:
-
-```bash
-docker compose run --rm admin users show USER
+```text
+Catalog:  https://books.example.com/catalog
+KOSync:   https://books.example.com/kosync
 ```
 
-Use that login for OPDS and KOSync:
+Replace `books.example.com` with your server's `BOOKS_PUBLIC_HOST` value.
 
-| Use | URL | Credential |
-|---|---|---|
-| Read in browser or Readest apps | `https://web.readest.com/` | Your own Readest account |
-| Download books | `https://books.example.com/catalog` | Same Books username and password |
-| Sync reading position | `https://books.example.com/kosync` | Same Books username and password |
+Each user uses one Books username and password for both the catalog and sync. The owner prints credentials with:
 
-Use `https://books.example.com/catalog` when the app accepts any OPDS URL. The
-legacy `/opds` path remains available for clients that expect that name.
+```bash
+docker compose run --rm admin users show alice
+```
 
-## XTEink X4 with CrossPoint
+Download each book from the catalog on every device before opening it. KOSync matches progress by the file's content hash, so all devices need the same file from the same OPDS source.
 
-Use CrossPoint on the X4.
+---
 
-1. Add an OPDS catalog.
-2. Use `https://books.example.com/catalog`.
-3. Enter the reader's Books username and password.
-4. Download the EPUB from that catalog.
-5. Set the sync server to `https://books.example.com/kosync`.
-6. Enter the same Books username and password.
+## Readest — Web, Android, iPad, macOS, Windows
 
-If CrossPoint exposes document matching, choose binary or file-content matching.
-If that option is hidden, test the X4 against another synced device before
-relying on it.
+Readest is the primary reader app for non-e-ink devices. Set up OPDS and KOReader Sync on each Readest installation.
 
-## Readest Web, Android, iPad, macOS, and Windows
-
-Use Readest on the general-purpose devices. Menu labels can vary a little by
-platform, but the two things to find are OPDS catalogs and KOReader Sync.
-
-1. Install Readest, or open `https://web.readest.com/`.
+1. Install [Readest](https://github.com/readest/readest) or open [web.readest.com](https://web.readest.com/).
 2. Sign in to a Readest account.
-3. From the library page, open Import Menu, then Online Library.
-4. Add a new OPDS catalog at `https://books.example.com/catalog`.
-5. Sign in to the catalog with the reader's Books username and password.
+3. From the library page, open **Import Menu → Online Library**.
+4. Add an OPDS catalog at `https://books.example.com/catalog`.
+5. Sign in with the user's Books username and password.
 6. Browse the catalog and download a book.
-7. Open the downloaded book.
-8. Open Book Menu, then KOReader Sync.
-9. Use `https://books.example.com/kosync`.
+7. Open the book.
+8. Open **Book Menu → KOReader Sync**.
+9. Set the server to `https://books.example.com/kosync`.
 10. Sign in with the same Books username and password.
-11. Set Checksum Method to File Content.
-12. Repeat this on each Readest device.
+11. Set **Checksum Method** to **File Content**.
 
-The KOSync URL is exactly `https://books.example.com/kosync`.
+Repeat on each Readest device. Readest may sync catalog URLs across signed-in devices. Password sync uses Readest's optional Credentials sync with a shared passphrase — re-enter the Books login on any device that needs the catalog or KOSync settings.
 
-Readest account sync may copy catalog URLs across devices. Password sync uses
-Readest's optional Credentials sync and the same sync passphrase on each device.
-Enter the Books login again on any device that needs the catalog or KOSync
-settings.
+After setup, test with a short book from the catalog. Open it on one device and advance to a clear chapter, then open the same catalog download on another device. If the second device lands near the same spot, the sync path is working.
 
-For this library, use OPDS for books and KOSync for progress.
+---
 
-After setup, test with any short book from the catalog. Open it on one device,
-move to a clear section or chapter, then open the same catalog download on
-another device. If the second device lands near that spot, the core sync path is
-working.
+## CrossPoint — XTEink devices
+
+Use CrossPoint on XTEink e-ink devices.
+
+1. Add an OPDS catalog at `https://books.example.com/catalog`.
+2. Sign in with the user's Books username and password.
+3. Download the EPUB from the catalog.
+4. Set the sync server to `https://books.example.com/kosync`.
+5. Sign in with the same Books username and password.
+6. Use binary or file-content document matching if the setting is visible.
+
+If CrossPoint does not expose a document matching option, test sync against another device before relying on it.
+
+---
 
 ## KOReader
 
-Use KOReader anywhere it is available and pleasant to read on. It is also the
-Kobo path when shared progress matters more than the stock Kobo interface.
+KOReader works on Android and is the standard path for Kobo when shared progress matters more than the stock Kobo reading interface.
 
-1. Add the OPDS catalog at `https://books.example.com/catalog`.
-2. Sign in with the reader's Books username and password.
-3. Download the EPUB from OPDS.
+1. Add an OPDS catalog at `https://books.example.com/catalog`.
+2. Sign in with the user's Books username and password.
+3. Download the EPUB from the catalog.
 4. Set the sync server to `https://books.example.com/kosync`.
 5. Sign in with the same Books username and password.
-6. Use binary document matching.
+6. Set document matching to **binary**.
 
-KOReader is the reference client for the progress lane, so include it in sync
-tests when possible.
+---
 
 ## Kobo
 
-For Kobo, use KOReader when shared progress matters. Stock Kobo can be tested
-later with copied-library sidecars.
+Install KOReader on the Kobo and follow the KOReader steps above to use shared progress.
 
-## Progress problems
+---
 
-If a book opens in the wrong place on another device, check these first:
+## Progress troubleshooting
 
-- Both devices downloaded the book from `https://books.example.com/catalog`.
-- Readest uses file-content matching.
-- KOReader uses binary matching.
-- Each person uses their own Books login.
-- KOSync syncs reading position only. Notes, highlights, bookmarks, and book
-  files stay in the reader app.
-- Official KOSync is last-write-wins, so a stale device can move progress
-  backward if it syncs later.
-- The Calibre EPUB has the same file content as the version downloaded by the
-  other devices.
-- Public route tests run from a real external device.
+If a book opens in the wrong place on a second device, check these first:
 
-If two people see each other's reading position, they are sharing a Books login.
-Issue separate accounts and stop using the shared login.
+- Both devices downloaded the EPUB from `https://books.example.com/catalog`.
+- Readest is set to **File Content** as the Checksum Method.
+- KOReader is set to **binary** document matching.
+- Each user is using their own Books login, not a shared one.
+- KOSync is last-write-wins. A stale device that syncs after a more recent session will overwrite the newer position.
+- KOSync tracks position only. Bookmarks, highlights, and notes stay in the reader app.
+
+If two users are seeing each other's position, they are sharing a Books login. Issue separate accounts and stop using the shared one.
