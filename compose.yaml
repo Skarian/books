@@ -64,6 +64,8 @@ services:
     command: ["sh", "-lc", "while true; do node src/cli.js hardcover sync; sleep 300; done"]
     volumes:
       - ${BOOKS_HOST_DATA_DIR:-./data}:/srv/books
+    secrets:
+      - annas_secret_key
     depends_on:
       - calibre
       - kosync
@@ -76,5 +78,11 @@ services:
       - .env
     volumes:
       - ${BOOKS_HOST_DATA_DIR:-./data}:/srv/books
+    secrets:
+      - annas_secret_key
     entrypoint: ["/app/docker/books/entrypoint.sh", "/app/src/cli.js"]
     command: ["--help"]
+
+secrets:
+  annas_secret_key:
+    file: ./secrets/annas_secret_key

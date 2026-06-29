@@ -33,7 +33,8 @@ User creation goes through the owner CLI.
 
 `bootstrap` creates these runtime paths:
 
-- `.env`: operator config and API keys.
+- `.env`: operator config.
+- `secrets/annas_secret_key`: Anna's Archive API key.
 - `data/config/secrets.json`: generated internal Calibre admin secret.
 - `data/library`: Calibre library.
 - `data/downloads`: Anna downloads.
@@ -43,8 +44,8 @@ User creation goes through the owner CLI.
 - `data/config/users.sqlite`: Calibre user database.
 - `data/kosync`: KOSync Redis state.
 
-Back up `.env` and the configured data directory if you care about the live
-library, API keys, and user state.
+Back up `.env`, `secrets/annas_secret_key`, and the configured data directory if
+you care about the live library, API keys, and user state.
 
 ## Fresh setup
 
@@ -53,7 +54,9 @@ cd /home/exedev/books
 cp .env.example .env
 chmod 600 .env
 $EDITOR .env
-mkdir -p data/import
+mkdir -p data/import secrets
+printf '%s' 'ANNA_SECRET_KEY_HERE' > secrets/annas_secret_key
+chmod 600 secrets/annas_secret_key
 docker compose build
 docker compose run --rm admin bootstrap
 docker compose up -d
@@ -61,8 +64,8 @@ docker compose run --rm admin health
 docker compose run --rm admin users create "Alice" --email alice@example.com
 ```
 
-Install Docker and Docker Compose before running the stack. Keep `.env` private;
-it can hold API keys.
+Install Docker and Docker Compose before running the stack. Keep `.env` and
+`secrets/annas_secret_key` private.
 
 ## Deployment address
 

@@ -1,7 +1,12 @@
 const path = require("path");
+const fs = require("fs");
 
 function value(name, fallback) {
   return process.env[name] && process.env[name] !== "" ? process.env[name] : fallback;
+}
+
+function secret(file) {
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim() : "";
 }
 
 const dataDir = value("BOOKS_DATA_DIR", "/srv/books");
@@ -26,7 +31,7 @@ module.exports = {
   calibreAdminUser: "books_admin",
   kosyncInternalUrl: "http://kosync:17200",
   annasBin: "/opt/books/bin/annas-mcp",
-  annasSecretKey: value("ANNAS_SECRET_KEY", ""),
+  annasSecretKey: secret("/run/secrets/annas_secret_key"),
   annasBaseUrl: "annas-archive.li",
   annasDownloadPath: downloadDir,
   hardcoverDailyDownloadCap: Number(value("HARDCOVER_DAILY_DOWNLOAD_CAP", "10")),
