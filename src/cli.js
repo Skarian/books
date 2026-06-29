@@ -17,25 +17,23 @@ Commands:
   hardcover ARGS...      Sync Hardcover Want to Read items into the library`);
 }
 
-function printAccount(row, json = false) {
-  const payload = state.accountPayload(row);
-  if (json) return console.log(JSON.stringify(payload, null, 2));
-  console.log(`${payload.display_name} (${payload.slug}) [${payload.status}]`);
+function printAccount(row) {
+  console.log(`${row.display_name} (${row.slug})`);
   console.log();
   console.log("Use this login for the book catalog and reading sync:");
-  console.log(`Username: ${payload.books_username}`);
-  console.log(`Password: ${payload.books_password}`);
+  console.log(`Username: ${row.slug}`);
+  console.log(`Password: ${row.books_password}`);
   console.log("Reader guide: docs/reader-setup.md");
   console.log();
-  console.log(`Readest: ${payload.readest_url}`);
+  console.log("Readest: https://web.readest.com/");
   console.log("Readest account: create or sign in with your own Readest account.");
   console.log();
-  console.log(`OPDS URL: ${payload.opds_url}`);
+  console.log(`OPDS URL: https://${config.publicHost}/catalog`);
   console.log();
-  console.log(`KOSync URL: ${payload.kosync_url}`);
-  if (payload.hardcover_sync_enabled) {
+  console.log(`KOSync URL: https://${config.publicHost}/kosync`);
+  if (row.hardcover_token) {
     console.log();
-    console.log(`Hardcover: ${payload.hardcover_username}`);
+    console.log(`Hardcover: ${row.hardcover_username}`);
   }
 }
 
@@ -65,7 +63,7 @@ async function reconcile(user) {
 async function users(args) {
   const command = args.shift();
   if (command === "list") {
-    for (const row of state.listAccounts()) console.log(`${row.slug}\t${row.status}\t${row.display_name}\t${row.email || ""}`);
+    for (const row of state.listAccounts()) console.log(`${row.slug}\t${row.display_name}\t${row.email || ""}`);
   } else if (command === "create") {
     const name = requireArg(args.shift(), "Missing name.");
     let slug;
@@ -81,7 +79,8 @@ async function users(args) {
     printAccount(state.getAccount(row.slug));
   } else if (command === "show") {
     const user = requireArg(args.shift(), "Missing user.");
-    printAccount(state.getAccount(user), args.includes("--json"));
+    if (args.length) throw new Error(`Unknown users show option: ${args[0]}`);
+    printAccount(state.getAccount(user));
   } else if (command === "reconcile") {
     await reconcile(args.shift());
   } else {

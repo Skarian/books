@@ -90,10 +90,9 @@ async function kosyncCreateUser(user, rawPassword) {
 }
 
 async function reconcileAccount(row) {
-  if (row.status !== "active") return `skipped inactive user ${row.slug}`;
   calibreSetUser(row.slug, row.books_password, true);
   await kosyncCreateUser(row.slug, row.books_password);
-  return `reconciled active user ${row.slug}`;
+  return `reconciled user ${row.slug}`;
 }
 
 async function reconcile(slug) {

@@ -82,7 +82,7 @@ function getAccount(slug) {
 
 function activeAccountsWithHardcover() {
   return readState().accounts
-    .filter((row) => row.status === "active" && row.hardcover_token)
+    .filter((row) => row.hardcover_token)
     .sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
@@ -91,23 +91,7 @@ function listAccounts() {
 }
 
 function firstActiveAccount() {
-  return readState().accounts.filter((row) => row.status === "active").sort((a, b) => a.slug.localeCompare(b.slug))[0];
-}
-
-function accountPayload(row) {
-  return {
-    slug: row.slug,
-    display_name: row.display_name,
-    email: row.email,
-    status: row.status,
-    books_username: row.slug,
-    books_password: row.books_password,
-    readest_url: "https://web.readest.com/",
-    opds_url: `https://${config.publicHost}/catalog`,
-    kosync_url: `https://${config.publicHost}/kosync`,
-    hardcover_username: row.hardcover_username,
-    hardcover_sync_enabled: Boolean(row.hardcover_token)
-  };
+  return readState().accounts.slice().sort((a, b) => a.slug.localeCompare(b.slug))[0];
 }
 
 function updateAccount(slug, values) {
@@ -128,7 +112,6 @@ function createAccount({ name, slug, email }) {
       slug: finalSlug,
       display_name: name,
       email: email || null,
-      status: "active",
       books_password: passphrase(),
       hardcover_token: null,
       hardcover_user_id: null,
@@ -162,6 +145,6 @@ function incrementDaily() {
 
 module.exports = {
   now, today, md5, passphrase, readState, writeState, getAccount, listAccounts,
-  firstActiveAccount, activeAccountsWithHardcover, accountPayload, createAccount,
+  firstActiveAccount, activeAccountsWithHardcover, createAccount,
   updateAccount, setHardcoverToken, clearHardcoverToken, dailyCount, incrementDaily
 };
