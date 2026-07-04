@@ -123,14 +123,67 @@ function setCalibreRestrictions(user, restriction) {
   ].join(";")]);
 }
 
-function findBookByAnna(annaMd5) {
-  if (!annaMd5) return null;
-  const result = calibredb(["search", `identifiers:anna:${annaMd5}`], { check: false });
+function calibreSearch(query) {
+  const result = calibredb(["search", query], { check: false });
   if (result.status !== 0 && !/No books matching/i.test(`${result.stdout}\n${result.stderr}`)) {
     const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
-    throw new Error(output || `Calibre search failed: ${annaMd5}`);
+    throw new Error(output || `Calibre search failed: ${query}`);
   }
-  return String(result.stdout || "").split(/[,\s]+/).map((id) => Number(id)).find(Number.isSafeInteger) || null;
+  return String(result.stdout || "").split(/[,\s]+/).map((id) => Number(id)).filter(Number.isSafeInteger);
+}
+
+function findBookByAnna(annaMd5) {
+  return annaMd5 ? calibreSearch(`identifiers:anna:${annaMd5}`)[0] || null : null;
+}
+
+function listUserEpubBooks(slug) {
+  const user = state.validateUsers([slug])[0];
+  const result = calibredb(["list", "--search", `#books_users:"=${user}"`, "--fields", "id,title,authors,identifiers,formats", "--for-machine"], { library: config.libraryDir });
+  return JSON.parse(result.stdout).map((book) => ({
+    id: Number(book.id),
+    title: book.title || "",
+    authors: book.authors || "",
+    identifiers: book.identifiers || {},
+    epubPath: (book.formats || []).find((file) => /\.epub$/i.test(file))
+  })).filter((book) => book.epubPath);
+}
+
+function addIdentifier(calibreBookId, key, value) {
+  const result = calibredb(["list", "--search", `id:=${calibreBookId}`, "--fields", "id,identifiers", "--for-machine"], { library: config.libraryDir });
+  const [book] = JSON.parse(result.stdout);
+  if (!book || Number(book.id) !== Number(calibreBookId)) throw new Error(`Calibre book not found: ${calibreBookId}`);
+  const identifiers = { ...(book.identifiers || {}), [key]: String(value) };
+  const field = Object.entries(identifiers).map(([name, id]) => `${name}:${id}`).join(",");
+  calibredb(["set_metadata", String(calibreBookId), "--field", `identifiers:${field}`], { library: config.libraryDir });
+}
+
+function koreaderDocumentHash(file) {
+  const hash = crypto.createHash("md5");
+  const buffer = Buffer.alloc(1024);
+  const fd = fs.openSync(file, "r");
+  try {
+    for (const offset of [0, ...Array.from({ length: 10 }, (_, i) => 1024 * (4 ** i))]) {
+      const size = fs.readSync(fd, buffer, 0, buffer.length, offset);
+      if (!size) break;
+      hash.update(buffer.subarray(0, size));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest("hex");
+}
+
+async function kosyncProgress(row, documentHash) {
+  const response = await fetch(`${config.kosyncInternalUrl}/syncs/progress/${documentHash}`, {
+    headers: {
+      Accept: "application/vnd.koreader.v1+json",
+      "x-auth-user": row.slug,
+      "x-auth-key": state.md5(row.books_password)
+    }
+  });
+  if (!response.ok) throw new Error(`KOSync progress lookup failed for ${documentHash}: ${response.status}`);
+  const payload = await response.json();
+  return Number.isFinite(Number(payload.percentage)) ? { ...payload, percentage: Number(payload.percentage) } : null;
 }
 
 function finalizedImportCopy(input, options) {
@@ -283,6 +336,10 @@ module.exports = {
   annas,
   importFiles,
   findBookByAnna,
+  listUserEpubBooks,
+  addIdentifier,
+  koreaderDocumentHash,
+  kosyncProgress,
   grantBookVisibility,
   health
 };
