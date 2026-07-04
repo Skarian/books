@@ -32,7 +32,7 @@ module.exports = {
   kosyncInternalUrl: "http://kosync:17200",
   annasBin: "/opt/books/bin/annas-mcp",
   annasSecretKey: secret("/run/secrets/annas_secret_key"),
-  annasBaseUrl: "annas-archive.li",
+  annasBaseUrl: value("ANNAS_BASE_URL", "annas-archive.gl"),
   annasDownloadPath: downloadDir,
   hardcoverDailyDownloadCap: Number(value("HARDCOVER_DAILY_DOWNLOAD_CAP", "10")),
   defaultLanguage: "eng",
