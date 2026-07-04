@@ -37,11 +37,21 @@ function writeLegacyKosyncPatch(file, settings, network, token) {
     `local token = ${lua(token)}`,
     `local desired = ${lua(settings)}`,
     `local network = ${lua(network)}`,
+    'local DataStorage = require("datastorage")',
+    'local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")',
+    'local books_dir = (DataStorage:getDataDir() or "."):gsub("/+$", "") .. "/books"',
+    'if ok_lfs and not lfs.attributes(books_dir) then lfs.mkdir(books_dir) end',
     "local changed = false",
     'local marker = G_reader_settings:readSetting("books_kosync_setup_token")',
     'local kosync = G_reader_settings:readSetting("kosync") or {}',
     "if marker ~= token then",
     "  for key, value in pairs(desired) do kosync[key] = value end",
+    '  G_reader_settings:saveSetting("home_dir", books_dir)',
+    '  G_reader_settings:saveSetting("download_dir", books_dir)',
+    '  G_reader_settings:saveSetting("lastdir", books_dir)',
+    '  G_reader_settings:saveSetting("quickstart_shown_version", 9999999999)',
+    '  local help_dir = (DataStorage:getDataDir() or "."):gsub("/+$", "") .. "/help"',
+    '  if ok_lfs and lfs.attributes(help_dir, "mode") == "directory" then for name in lfs.dir(help_dir) do if name:match("^quickstart%-.*%.html$") then os.remove(help_dir .. "/" .. name) end end end',
     '  G_reader_settings:saveSetting("kosync", kosync)',
     '  G_reader_settings:saveSetting("books_kosync_setup_token", token)',
     "  changed = true",
@@ -100,10 +110,11 @@ function generate(row, name, options = {}) {
     wifi_enable_action: "turn_on"
   };
   try {
+    fs.mkdirSync(path.join(root, "books"), { recursive: true, mode: 0o700 });
     writeLua(path.join(root, "settings", "opds.lua"), {
       servers: [{ title: "Books", url: `https://${config.publicHost}/catalog`, username: row.slug, password: row.books_password }]
     });
-    writeLegacyKosyncPatch(path.join(root, "patches", "2-books-kosync.lua"), kosync, network, state.md5(`${row.slug}:${kosync.userkey}:${kosync.custom_server}`));
+    writeLegacyKosyncPatch(path.join(root, "patches", "2-books-kosync.lua"), kosync, network, state.md5(`${row.slug}:${kosync.userkey}:${kosync.custom_server}:books-folder-v2`));
     stageSimpleUi(root, options.downloadSimpleUi);
     system.run("zip", ["-qr", zipPath, rootName.split("/")[0]], { cwd: tempDir });
     return { path: zipPath, tempDir };

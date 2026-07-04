@@ -47,12 +47,14 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   const androidBundle = koreader.generate(row, "koreader-android-kindle.zip");
   const koboBundle = koreader.generate(row, "koreader-kobo.zip");
   const android = zipList(androidBundle.path);
+  assert.ok(android.includes("koreader/books/"));
   assert.ok(android.includes("koreader/settings/opds.lua"));
   assert.ok(!android.includes("koreader/settings/kosync.lua"));
   assert.ok(android.includes("koreader/patches/2-books-kosync.lua"));
   assert.ok(android.includes("koreader/plugins/simpleui.koplugin/main.lua"));
 
   const kobo = zipList(koboBundle.path);
+  assert.ok(kobo.includes(".adds/koreader/books/"));
   assert.ok(kobo.includes(".adds/koreader/settings/opds.lua"));
   assert.ok(!kobo.includes(".adds/koreader/settings/kosync.lua"));
   assert.ok(kobo.includes(".adds/koreader/patches/2-books-kosync.lua"));
@@ -63,6 +65,13 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(opds, /alpha-bravo-charlie-delta-echo-foxtrot/);
 
   const patch = zipRead(androidBundle.path, "koreader/patches/2-books-kosync.lua");
+  assert.match(patch, /DataStorage:getDataDir/);
+  assert.match(patch, /books_dir/);
+  assert.match(patch, /home_dir/);
+  assert.match(patch, /download_dir/);
+  assert.match(patch, /lastdir/);
+  assert.match(patch, /quickstart_shown_version/);
+  assert.match(patch, /quickstart%-\.\*%\.html/);
   assert.match(patch, /G_reader_settings:readSetting\("kosync"\)/);
   assert.match(patch, /G_reader_settings:saveSetting\("kosync", kosync\)/);
   assert.match(patch, /https:\/\/books\.test\/kosync/);
@@ -70,7 +79,6 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(patch, /sync_forward"\] = 2/);
   assert.match(patch, /sync_backward"\] = 3/);
   assert.match(patch, /checksum_method"\] = 0/);
-  assert.match(patch, /65c83ac7651660d80cf4600d468e45f9/);
   assert.match(patch, /"wifi_enable_action"\] = "turn_on"/);
   assert.doesNotMatch(patch, /wifi_disable_action/);
   koreader.cleanup(androidBundle);
