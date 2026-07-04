@@ -46,6 +46,36 @@ test("progress conversion uses one percent or one page threshold", () => {
   assert.equal(hardcover._test.progressPages(1.2, 100), null);
 });
 
+test("Anna candidate gate requires title and author identity", () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const good = {
+    title: "High Growth Handbook: Scaling Startups From 10 to 10,000 People",
+    authors: "Gil, Elad",
+    language: "English",
+    format: "EPUB",
+    hash: "hash"
+  };
+  assert.equal(hardcover._test.isEligibleCandidate(good, "High Growth Handbook", "Elad Gil"), true);
+  assert.equal(hardcover._test.isEligibleCandidate({ ...good, title: "Some Other Book" }, "High Growth Handbook", "Elad Gil"), false);
+  assert.equal(hardcover._test.isEligibleCandidate({ ...good, authors: "Other Person" }, "High Growth Handbook", "Elad Gil"), false);
+  assert.equal(hardcover._test.isEligibleCandidate({ ...good, format: "PDF" }, "High Growth Handbook", "Elad Gil"), false);
+  assert.equal(hardcover._test.isEligibleCandidate({ ...good, language: "Spanish" }, "High Growth Handbook", "Elad Gil"), false);
+});
+
+test("Anna candidate gate fails closed on weak title evidence", () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const base = { authors: "Jeffrey Pfeffer", language: "English", format: "EPUB", hash: "hash" };
+  assert.equal(hardcover._test.isEligibleCandidate({ ...base, title: "Power : why some people have it-- and others don't" }, "Power", "Jeffrey Pfeffer"), true);
+  assert.equal(hardcover._test.isEligibleCandidate({ ...base, title: "7 Rules of Power : Surprising Advice" }, "Power", "Jeffrey Pfeffer"), false);
+  assert.equal(hardcover._test.isEligibleCandidate({
+    title: "快思慢想 = Thinking, Fast and Slow",
+    authors: "康納曼 (Daniel Kahneman)",
+    language: "English",
+    format: "EPUB",
+    hash: "hash"
+  }, "Thinking, Fast and Slow", "Daniel Kahneman"), false);
+});
+
 test("progress push dry-run creates only from exact identifiers", async () => {
   const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
   const logs = [];

@@ -8,6 +8,8 @@ const GRAPHQL_URL = "https://api.hardcover.app/v1/graphql";
 const WANT_TO_READ_STATUS = 1;
 const CURRENTLY_READING_STATUS = 2;
 const PROGRESS_THRESHOLD = 0.01;
+const TITLE_STOPWORDS = new Set(["a", "an", "and", "are", "as", "at", "by", "for", "from", "has", "have", "in", "into", "it", "of", "on", "or", "the", "to", "with"]);
+const AUTHOR_SUFFIXES = new Set(["jr", "sr", "ii", "iii", "iv"]);
 
 function normalizeToken(token) {
   const trimmed = String(token || "").trim();
@@ -94,20 +96,50 @@ function parseAnnaBlocks(output) {
   return blocks;
 }
 
-function scoreCandidate(item, title, author) {
-  const format = (item.format || "").toLowerCase();
-  const language = (item.language || "").toLowerCase();
-  const candidateTitle = (item.title || "").toLowerCase();
-  const candidateAuthors = (item.authors || "").toLowerCase();
-  let score = 0;
-  if (format === "epub") score += 100;
-  else score -= 100;
-  if (["english", "eng", "en"].includes(language)) score += 50;
-  else if (language) score -= 50;
-  for (const token of `${title} ${author}`.toLowerCase().match(/[a-z0-9]+/g) || []) {
-    if (token.length > 3 && (candidateTitle.includes(token) || candidateAuthors.includes(token))) score += 3;
+function meaningfulTokens(value) {
+  return (String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/['\u2019]/g, "").toLowerCase().match(/[a-z0-9]+/g) || [])
+    .filter((token) => !TITLE_STOPWORDS.has(token) && (/^\d+$/.test(token) || token.length >= 3));
+}
+
+function tokenSet(value) {
+  return new Set(meaningfulTokens(value));
+}
+
+function hasAsciiLeadingTitle(value) {
+  return /^[A-Za-z0-9]/.test(String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/^[\s"'([{<]+/, ""));
+}
+
+function authorSurnames(author) {
+  return String(author || "").split(/\s*(?:,|&|\band\b)\s*/i).map((name) => {
+    const tokens = meaningfulTokens(name).filter((token) => !AUTHOR_SUFFIXES.has(token));
+    return tokens[tokens.length - 1];
+  }).filter(Boolean);
+}
+
+function isEligibleCandidate(item, title, author) {
+  if (!item.hash || String(item.format || "").trim().toLowerCase() !== "epub") return false;
+  if (!["english", "eng", "en"].includes(String(item.language || "").trim().toLowerCase())) return false;
+  if (hasAsciiLeadingTitle(title) && !hasAsciiLeadingTitle(item.title)) return false;
+
+  const titleTokens = meaningfulTokens(title);
+  const candidateTitleTokens = tokenSet(item.title);
+  if (!titleTokens.length || candidateTitleTokens.values().next().value !== titleTokens[0]) return false;
+  if (!titleTokens.every((token) => candidateTitleTokens.has(token))) return false;
+
+  if (String(author || "").trim()) {
+    const surnames = authorSurnames(author);
+    const candidateAuthorTokens = tokenSet(item.authors);
+    if (!surnames.length || !surnames.some((token) => candidateAuthorTokens.has(token))) return false;
   }
-  if (item.hash) score += 1;
+  return true;
+}
+
+function scoreCandidate(item, title, author) {
+  const candidateTitleTokens = tokenSet(item.title);
+  const candidateAuthorTokens = tokenSet(item.authors);
+  let score = 0;
+  for (const token of meaningfulTokens(title)) if (candidateTitleTokens.has(token)) score += 3;
+  for (const token of authorSurnames(author)) if (candidateAuthorTokens.has(token)) score += 2;
   return score;
 }
 
@@ -115,9 +147,9 @@ function findCandidate(title, author) {
   const query = `${title} ${author} epub english`.trim();
   const result = system.annas(["book-search", query], { check: false });
   if (result.status !== 0) throw new Error(result.stderr || result.stdout || `Anna search failed for ${title}`);
-  const candidates = parseAnnaBlocks(result.stdout).filter((item) => item.hash);
+  const candidates = parseAnnaBlocks(result.stdout).filter((item) => isEligibleCandidate(item, title, author));
   candidates.sort((a, b) => scoreCandidate(b, title, author) - scoreCandidate(a, title, author));
-  if (!candidates.length || scoreCandidate(candidates[0], title, author) < 50) {
+  if (!candidates.length) {
     throw new Error(`No English EPUB candidate found for ${title}`);
   }
   return candidates[0];
@@ -409,6 +441,8 @@ module.exports = {
   verifyToken,
   sync,
   _test: {
+    findCandidate,
+    isEligibleCandidate,
     isbnValues,
     progressPages,
     progressTime,
