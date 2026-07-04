@@ -1,12 +1,13 @@
 # Architecture
 
-Books is a Docker Compose stack combining Calibre, a KOReader sync server, an nginx proxy, and a Node.js CLI into a single reading backend.
+Books is a Docker Compose stack combining Calibre, a KOReader sync server, an nginx proxy, and small Node.js services into a single reading backend.
 
 ## Design
 
 - **Calibre** owns book files, metadata, OPDS discovery, and downloads.
 - **KOSync** owns reading position.
 - **Hosted Readest** owns the reading UI and Readest accounts.
+- **The setup service** serves per-user KOReader config bundles.
 - **The Node CLI** owns setup, imports, account reconciliation, and Hardcover intake commands.
 - **Hardcover Want to Read** is the automatic intake queue.
 
@@ -14,19 +15,20 @@ Users read through hosted Readest, OPDS-capable apps, KOReader, or CrossPoint. T
 
 ## Containers
 
-`compose.yaml` defines five services:
+`compose.yaml` defines six services:
 
 | Service | Image | Role |
 |---|---|---|
 | `proxy` | `nginx:alpine` | Reverse proxy on `BOOKS_BIND_ADDR:BOOKS_PROXY_PORT` |
 | `calibre` | `books-runtime` | `calibre-server` with Basic auth, OPDS, and downloads |
 | `kosync` | `koreader/kosync` (pinned by digest) | KOReader Sync Server backed by Redis |
+| `setup` | `books-runtime` | Credential-gated KOReader setup ZIP downloads |
 | `worker` | `books-runtime` | Runs `hardcover sync` every five minutes |
 | `admin` | `books-runtime` | One-shot CLI container for owner commands |
 
-`calibre`, `worker`, and `admin` all use the `books-runtime` image built from the repo. The `worker` restarts continuously. The `admin` container uses the `admin` Compose profile and only runs via `docker compose run` — it does not start with `docker compose up`.
+`calibre`, `setup`, `worker`, and `admin` all use the `books-runtime` image built from the repo. The `setup` service and `worker` restart continuously. The `admin` container uses the `admin` Compose profile and only runs via `docker compose run` — it does not start with `docker compose up`.
 
-All three `books-runtime` containers mount the data directory at `/srv/books`. The `kosync` container mounts its Redis data under `/srv/books/kosync`.
+All four `books-runtime` services mount the data directory at `/srv/books`. The `kosync` container mounts its Redis data under `/srv/books/kosync`.
 
 ## Routes
 
@@ -38,6 +40,8 @@ https://books.example.com
   /opds                 → Calibre OPDS (Calibre's native path, kept for compatibility)
   /get/...              → Calibre book downloads
   /kosync/...           → KOSync (nginx strips the /kosync prefix before proxying)
+  /koreader             → Books setup service page
+  /setup/<zip>          → Books setup service ZIP downloads
   /library              → 302 redirect to https://web.readest.com/
   /healthz              → nginx returns "ok" directly, no upstream
   /kosync/users/create  → 404 (registration disabled; accounts are managed by the CLI)
@@ -50,6 +54,8 @@ nginx uses Docker's internal DNS resolver (`127.0.0.11`) with `valid=30s` so it 
 **OPDS and downloads (`/catalog`, `/opds`, `/get/...`):** Calibre HTTP Basic auth. nginx passes the `Authorization` header through unchanged. Calibre validates credentials against `data/config/users.sqlite`.
 
 **KOSync (`/kosync/...`):** KOSync's own credential scheme. Clients send `x-auth-user` (username) and `x-auth-key` (MD5 hash of the password) as request headers. KOSync stores passwords as MD5 hashes in Redis.
+
+**KOReader setup (`/koreader`, `/setup/...`):** HTTP Basic auth against `state.json`. The setup page and ZIP downloads use the authenticated user, and only known KOReader ZIP filenames are served.
 
 Each user gets one Books login — username and diceware passphrase — that works for both systems. The `reconcile` command writes that login into Calibre and KOSync whenever an account is created, restored, or pushed.
 
@@ -64,6 +70,7 @@ Runtime state lives under the data directory (`BOOKS_HOST_DATA_DIR`, default `./
 | `data/config/state.json` | Account registry, Hardcover tokens, daily download counts |
 | `data/config/secrets.json` | Calibre admin password (generated on bootstrap, not rotated) |
 | `data/config/users.sqlite` | Calibre user database |
+| `data/config/simpleui.koplugin/` | Cached SimpleUI plugin source copied into starter bundles |
 | `data/library/` | Calibre book library — EPUB files and metadata |
 | `data/downloads/` | Anna's Archive download cache |
 | `data/import/` | Drop zone for manual EPUB imports |

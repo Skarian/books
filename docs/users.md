@@ -45,6 +45,18 @@ Prints the full handoff: Books username, passphrase, Readest Web link, OPDS URL,
 
 Keep `.env`, `secrets/annas_secret_key`, `data/config/secrets.json` (Calibre admin credentials), and Hardcover tokens owner-only.
 
+## KOReader setup links
+
+KOReader setup ZIPs are generated on demand when a user opens the setup page and signs in with their Books username and password. The SimpleUI starter bundle downloads pinned SimpleUI `2.0.1` into `data/config/simpleui.koplugin` the first time it is needed; later requests reuse that cached copy.
+
+Send every KOReader user the same page:
+
+```text
+https://books.example.com/koreader
+```
+
+After login, the page shows Android GitHub APK/Kindle and Kobo downloads for that account. The links are not secret; the ZIPs contain credentials and should be treated like the passphrase itself.
+
 ## Reconcile
 
 ```bash

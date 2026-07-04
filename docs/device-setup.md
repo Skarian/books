@@ -58,7 +58,16 @@ If CrossPoint does not expose a document matching option, test sync against anot
 
 ## KOReader
 
-KOReader works on Android and is the standard path for Kobo when shared progress matters more than the stock Kobo reading interface.
+KOReader works on Android using the GitHub release APK and is the standard path for Kobo when shared progress matters more than the stock Kobo reading interface.
+
+The easiest setup path is `https://books.example.com/koreader`. Sign in with the Books username and password, download the matching ZIP, then extract it at the device storage root:
+
+- Android GitHub APK or Kindle: the ZIP creates or merges a `koreader/` folder.
+- Kobo: the ZIP creates or merges `.adds/koreader/`.
+
+Back up the existing KOReader folder before installing the SimpleUI starter bundle on a customized device. Restart KOReader after extracting. Progress sync is enabled by default and newer saved positions are applied automatically. SimpleUI collections are local to KOReader and may be empty until collections are created on the device.
+
+Manual setup remains:
 
 1. Add an OPDS catalog at `https://books.example.com/catalog`.
 2. Sign in with the user's Books username and password.

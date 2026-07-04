@@ -64,7 +64,7 @@ Run `bootstrap` once on a fresh install. It is safe to run again after a restore
 docker compose up -d
 ```
 
-This starts `proxy`, `calibre`, `kosync`, and `worker`. The `admin` container runs on demand and does not start here.
+This starts `proxy`, `calibre`, `kosync`, `setup`, and `worker`. The `admin` container runs on demand and does not start here.
 
 Verify everything is reachable:
 

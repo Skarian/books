@@ -40,6 +40,10 @@ Repeat on each Readest device. Readest may copy catalog settings across signed-i
 
 ## KOReader
 
+If the owner sent the KOReader setup page, open it, sign in with your Books username and password, download the right ZIP for your device, extract it at the device storage root, and restart KOReader. Android users should use KOReader's GitHub release APK. Progress sync is enabled by default for books downloaded from the catalog.
+
+Manual setup:
+
 1. Add an OPDS catalog at `https://books.example.com/catalog`.
 2. Sign in with your Books username and password.
 3. Download the EPUB from the catalog.
