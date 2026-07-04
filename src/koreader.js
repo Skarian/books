@@ -1,0 +1,124 @@
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const config = require("./config");
+const state = require("./state");
+const system = require("./system");
+
+const SIMPLEUI_VERSION = "2.0.1";
+const SIMPLEUI_URL = `https://github.com/doctorhetfield-cmd/simpleui.koplugin/archive/refs/tags/${SIMPLEUI_VERSION}.tar.gz`;
+const SIMPLEUI_DIR = path.join(config.configDir, "simpleui.koplugin");
+const BUNDLES = {
+  "koreader-android-kindle.zip": "koreader",
+  "koreader-kobo.zip": ".adds/koreader"
+};
+
+function lua(value, depth = 0) {
+  const indent = "  ".repeat(depth);
+  const next = "  ".repeat(depth + 1);
+  if (Array.isArray(value)) return `{\n${value.map((item) => `${next}${lua(item, depth + 1)},`).join("\n")}\n${indent}}`;
+  if (value && typeof value === "object") {
+    return `{\n${Object.entries(value).map(([key, item]) => `${next}["${key}"] = ${lua(item, depth + 1)},`).join("\n")}\n${indent}}`;
+  }
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  return "nil";
+}
+
+function writeLua(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, `return ${lua(value)}\n`, { mode: 0o600 });
+}
+
+function writeLegacyKosyncPatch(file, settings, network, token) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, [
+    `local token = ${lua(token)}`,
+    `local desired = ${lua(settings)}`,
+    `local network = ${lua(network)}`,
+    "local changed = false",
+    'local marker = G_reader_settings:readSetting("books_kosync_setup_token")',
+    'local kosync = G_reader_settings:readSetting("kosync") or {}',
+    "if marker ~= token then",
+    "  for key, value in pairs(desired) do kosync[key] = value end",
+    '  G_reader_settings:saveSetting("kosync", kosync)',
+    '  G_reader_settings:saveSetting("books_kosync_setup_token", token)',
+    "  changed = true",
+    "end",
+    "for key, value in pairs(network) do",
+    "  if G_reader_settings:readSetting(key) == nil then",
+    "    G_reader_settings:saveSetting(key, value)",
+    "    changed = true",
+    "  end",
+    "end",
+    "if changed then G_reader_settings:flush() end",
+    ""
+  ].join("\n"), { mode: 0o600 });
+}
+
+function downloadSimpleUi() {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "books-simpleui-"));
+  const archive = path.join(tempDir, "simpleui.tar.gz");
+  const pending = `${SIMPLEUI_DIR}.${process.pid}.tmp`;
+  try {
+    system.run("curl", ["-fsSL", SIMPLEUI_URL, "-o", archive]);
+    system.run("tar", ["-xzf", archive, "-C", tempDir]);
+    const source = fs.readdirSync(tempDir).map((name) => path.join(tempDir, name)).find((file) => fs.statSync(file).isDirectory());
+    if (!source || !fs.existsSync(path.join(source, "main.lua"))) throw new Error("Downloaded SimpleUI archive did not contain main.lua.");
+    fs.rmSync(pending, { recursive: true, force: true });
+    fs.cpSync(source, pending, { recursive: true });
+    fs.renameSync(pending, SIMPLEUI_DIR);
+  } finally {
+    fs.rmSync(pending, { recursive: true, force: true });
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function stageSimpleUi(root, download = downloadSimpleUi) {
+  if (!fs.existsSync(SIMPLEUI_DIR) || !fs.statSync(SIMPLEUI_DIR).isDirectory()) download();
+  fs.mkdirSync(path.join(root, "plugins"), { recursive: true, mode: 0o700 });
+  fs.cpSync(SIMPLEUI_DIR, path.join(root, "plugins", "simpleui.koplugin"), { recursive: true });
+}
+
+function generate(row, name, options = {}) {
+  const rootName = BUNDLES[name];
+  if (!rootName) return null;
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "books-koreader-"));
+  const root = path.join(tempDir, rootName);
+  const zipPath = path.join(tempDir, name);
+  const kosync = {
+    custom_server: `https://${config.publicHost}/kosync`,
+    username: row.slug,
+    userkey: state.md5(row.books_password),
+    auto_sync: true,
+    sync_forward: 2,
+    sync_backward: 3,
+    checksum_method: 0
+  };
+  const network = {
+    wifi_enable_action: "turn_on"
+  };
+  try {
+    writeLua(path.join(root, "settings", "opds.lua"), {
+      servers: [{ title: "Books", url: `https://${config.publicHost}/catalog`, username: row.slug, password: row.books_password }]
+    });
+    writeLegacyKosyncPatch(path.join(root, "patches", "2-books-kosync.lua"), kosync, network, state.md5(`${row.slug}:${kosync.userkey}:${kosync.custom_server}`));
+    stageSimpleUi(root, options.downloadSimpleUi);
+    system.run("zip", ["-qr", zipPath, rootName.split("/")[0]], { cwd: tempDir });
+    return { path: zipPath, tempDir };
+  } catch (error) {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function cleanup(bundle) {
+  if (bundle) fs.rmSync(bundle.tempDir, { recursive: true, force: true });
+}
+
+module.exports = {
+  BUNDLES,
+  cleanup,
+  generate
+};
