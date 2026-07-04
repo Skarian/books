@@ -126,8 +126,11 @@ docker compose run --rm admin hardcover clear-token alice
 2. It searches Anna's Archive for candidates matching the title and author.
 3. Candidates are scored: EPUB format preferred, English language preferred, title and author token overlap weighted.
 4. If the best candidate scores above the threshold, an existing Anna match is granted or the file is downloaded to `data/downloads/` and imported into Calibre for that user.
-5. The Hardcover item moves from Want to Read to Currently Reading after the book is visible in the user's catalog.
-6. New downloads increment the VM-wide daily download count.
+5. The Calibre book records the Hardcover `book_id` as a `hardcover` identifier for future progress matching.
+6. The Hardcover item moves from Want to Read to Currently Reading after the book is visible in the user's catalog.
+7. New downloads increment the VM-wide daily download count.
+
+The same worker pass also pushes reading progress from KOSync back to Hardcover. For books fulfilled from Hardcover, progress is matched by the stored `hardcover` identifier. Manual imports can still match an existing Hardcover row by exact title/author, or create a row from an exact ISBN lookup. Progress only moves forward; the worker does not pull Hardcover progress into KOSync.
 
 Items with no match, a download error, or an import error are logged and stay on Want to Read. The worker retries on the next five-minute cycle.
 

@@ -106,8 +106,11 @@ Each `hardcover sync` pass:
 3. Scores each candidate: EPUB format (+100), English language (+50), title/author token overlap (+3 per matching token with length > 3), has a download hash (+1). Non-EPUB and non-English candidates are penalized.
 4. Skips the item if the best candidate is not confident enough.
 5. Grants an existing Anna match to the requesting user, or downloads the winning file to `data/downloads/` and imports it into Calibre for that user.
-6. Moves the Hardcover item from Want to Read to Currently Reading after the catalog grant succeeds.
-7. If a new file was downloaded, increments the VM-wide daily download counter in `state.json`.
+6. Stores the Hardcover `book_id` in Calibre identifiers as `hardcover:<book_id>` so later progress pushes can match the same Hardcover book without relying on ISBN.
+7. Moves the Hardcover item from Want to Read to Currently Reading after the catalog grant succeeds.
+8. If a new file was downloaded, increments the VM-wide daily download counter in `state.json`.
+
+After intake, the same sync pass scans the user's visible EPUBs for KOSync progress. If a book has a stored `hardcover` identifier, the worker pushes progress only when that id matches exactly one current Hardcover row for the user. Manual imports without a stored Hardcover id can still be matched to existing Hardcover rows by exact normalized title/author, or created from an exact ISBN lookup. The push is one-way from KOSync to Hardcover and never decreases Hardcover progress.
 
 Items that fail (no match, download error, import error) are logged and stay on Want to Read. The worker picks them up again on the next five-minute cycle.
 
