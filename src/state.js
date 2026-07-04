@@ -78,9 +78,15 @@ function account(data, slug) {
 }
 
 function getAccount(slug) {
-  const row = account(readState(), slug);
+  const row = account(readState(), validateSlug(slug));
   if (!row) throw new Error(`No account named ${slug}.`);
   return row;
+}
+
+function validateUsers(users) {
+  const unique = Array.from(new Set(users.map(validateSlug)));
+  for (const slug of unique) getAccount(slug);
+  return unique;
 }
 
 function activeAccountsWithHardcover() {
@@ -147,7 +153,7 @@ function incrementDaily() {
 }
 
 module.exports = {
-  now, today, md5, passphrase, readState, writeState, getAccount, listAccounts,
-  firstActiveAccount, activeAccountsWithHardcover, createAccount,
+  now, today, md5, passphrase, readState, writeState, getAccount, validateUsers,
+  listAccounts, firstActiveAccount, activeAccountsWithHardcover, createAccount,
   updateAccount, setHardcoverToken, clearHardcoverToken, dailyCount, incrementDaily
 };

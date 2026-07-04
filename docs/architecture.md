@@ -61,7 +61,7 @@ Runtime state lives under the data directory (`BOOKS_HOST_DATA_DIR`, default `./
 
 | Path | Contents |
 |---|---|
-| `data/config/state.json` | Account registry: slugs, display names, Books passwords, Hardcover tokens, daily download counts |
+| `data/config/state.json` | Account registry, Hardcover tokens, daily download counts |
 | `data/config/secrets.json` | Calibre admin password (generated on bootstrap, not rotated) |
 | `data/config/users.sqlite` | Calibre user database |
 | `data/library/` | Calibre book library — EPUB files and metadata |
@@ -70,7 +70,7 @@ Runtime state lives under the data directory (`BOOKS_HOST_DATA_DIR`, default `./
 | `data/log/` | Container logs written by calibre-server, KOSync, and Redis |
 | `data/kosync/` | KOSync Redis data |
 
-`state.json` is the source of truth for Books accounts. Calibre and KOSync are downstream; `reconcile` pushes state into them. Writes to `state.json` use a lock directory and an atomic rename (`writeFileSync` to a `.tmp` path, then `renameSync`) to avoid partial writes under concurrent access.
+`state.json` is the source of truth for Books accounts. Calibre stores book metadata and the hidden per-book `#books_users` grant field that drives catalog visibility. KOSync stores reading progress. Writes to `state.json` use a lock directory and an atomic rename (`writeFileSync` to a `.tmp` path, then `renameSync`) to avoid partial writes under concurrent access.
 
 Neither `state.json` nor `secrets.json` belong in git.
 
@@ -95,10 +95,10 @@ Each `hardcover sync` pass:
 1. Reads the Want to Read list from the Hardcover GraphQL API for each user with a configured token.
 2. Searches Anna's Archive for candidates via the `annas-mcp` CLI binary.
 3. Scores each candidate: EPUB format (+100), English language (+50), title/author token overlap (+3 per matching token with length > 3), has a download hash (+1). Non-EPUB and non-English candidates are penalized.
-4. Skips the item if the best candidate scores below 50 — meaning no sufficiently confident English EPUB match was found.
-5. Downloads the winning file to `data/downloads/` and imports it into Calibre using `calibredb add`.
-6. Moves the Hardcover item from Want to Read to Currently Reading via the Hardcover GraphQL mutation.
-7. Increments the VM-wide daily download counter in `state.json`.
+4. Skips the item if the best candidate is not confident enough.
+5. Grants an existing Anna match to the requesting user, or downloads the winning file to `data/downloads/` and imports it into Calibre for that user.
+6. Moves the Hardcover item from Want to Read to Currently Reading after the catalog grant succeeds.
+7. If a new file was downloaded, increments the VM-wide daily download counter in `state.json`.
 
 Items that fail (no match, download error, import error) are logged and stay on Want to Read. The worker picks them up again on the next five-minute cycle.
 
@@ -112,11 +112,11 @@ The download cap (`HARDCOVER_DAILY_DOWNLOAD_CAP`, default 10) is checked before 
 |---|---|
 | `bootstrap` | Creates data directory structure, generates and stores the Calibre admin password, initializes the Calibre user database |
 | `health` | Checks proxy `/healthz`, OPDS `/opds`, and KOSync `/kosync/healthcheck` in sequence |
-| `import FILE...` | Imports one or more EPUBs into Calibre via `calibredb add` |
+| `import --user USER FILE...` | Imports one or more EPUBs into Calibre and grants them to the named user |
 | `users list` | Lists all accounts (slug, display name, email) |
 | `users create NAME` | Creates an account with a generated passphrase, reconciles into Calibre and KOSync, prints handoff |
 | `users show USER` | Prints handoff credentials and URLs for a user |
-| `users reconcile [USER]` | Pushes state into Calibre and KOSync for one or all users |
+| `users reconcile [USER]` | Pushes users, Calibre restrictions, and KOSync accounts downstream |
 | `hardcover set-token USER` | Connects a verified Hardcover API token to an account |
 | `hardcover clear-token USER` | Removes the Hardcover token from an account |
 | `hardcover status [USER]` | Shows token status, Hardcover username, and daily download count |

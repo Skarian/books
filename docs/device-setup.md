@@ -1,6 +1,6 @@
 # Device setup
 
-Books come from the shared OPDS catalog. Reading position syncs through KOSync. The two URLs are:
+Books come from the user's OPDS catalog. Reading position syncs through KOSync. The two URLs are:
 
 ```text
 Catalog:  https://books.example.com/catalog

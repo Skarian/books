@@ -12,7 +12,8 @@ function usage() {
 Commands:
   bootstrap              Initialize container data paths and Calibre admin user
   health                 Check proxy, OPDS, and KOSync health
-  import FILE...         Import EPUB files into Calibre
+  import --user USER FILE...
+                         Import EPUB files for one or more users
   users ARGS...          Manage reader users and credentials
   hardcover ARGS...      Sync Hardcover Want to Read items into the library`);
 }
@@ -94,6 +95,20 @@ async function users(args) {
   }
 }
 
+function importCommand(args) {
+  const users = [];
+  const files = [];
+  while (args.length) {
+    const arg = args.shift();
+    if (arg === "--user") users.push(requireArg(args.shift(), "Missing --user value."));
+    else files.push(arg);
+  }
+  if (!users.length) throw new Error("Import requires at least one --user owner.");
+  if (!files.length) throw new Error("No files supplied. Usage: docker compose run --rm admin import --user USER FILE [FILE ...]");
+  const rows = system.importFiles(files, { users });
+  for (const row of rows) console.log(`imported ${row.calibre_book_id}\t${row.users.join(",")}\t${row.title || ""}`);
+}
+
 async function hardcoverCommand(args) {
   const command = args.shift();
   if (command === "set-token") {
@@ -132,11 +147,6 @@ async function hardcoverCommand(args) {
   } else {
     throw new Error("Unknown hardcover command.");
   }
-}
-
-function importCommand(args) {
-  if (!args.length) throw new Error("No files supplied. Usage: docker compose run --rm admin import FILE [FILE ...]");
-  system.importFiles(args);
 }
 
 async function main() {

@@ -121,19 +121,38 @@ function findCandidate(title, author) {
   return candidates[0];
 }
 
-function downloadAndImport(candidate, filename) {
+function downloadCandidate(candidate, filename) {
   fs.mkdirSync(config.downloadDir, { recursive: true });
   const downloadPath = path.join(config.downloadDir, filename);
-  let downloaded = false;
-  if (!fs.existsSync(downloadPath)) {
-    const result = system.annas(["book-download", candidate.hash, filename], { check: false });
-    if (result.status !== 0) throw new Error(result.stderr || result.stdout || `Anna download failed for ${candidate.hash}`);
-    downloaded = true;
+  if (fs.existsSync(downloadPath)) return downloadPath;
+  if (config.hardcoverDailyDownloadCap > 0 && state.dailyCount() >= config.hardcoverDailyDownloadCap) {
+    throw new Error(`Daily Anna download cap reached: ${state.dailyCount()}/${config.hardcoverDailyDownloadCap}`);
   }
+  const result = system.annas(["book-download", candidate.hash, filename], { check: false });
+  if (result.status !== 0) throw new Error(result.stderr || result.stdout || `Anna download failed for ${candidate.hash}`);
   if (!fs.existsSync(downloadPath)) throw new Error(`Anna download completed but ${downloadPath} was not found.`);
-  if (downloaded) state.incrementDaily();
-  system.importFiles([downloadPath]);
+  state.incrementDaily();
   return downloadPath;
+}
+
+async function fulfillRequest(row, userBook, title, author, candidate) {
+  const existingId = system.findBookByAnna(candidate.hash);
+  if (existingId) {
+    const users = system.grantBookVisibility(existingId, [row.slug]);
+    await moveToCurrentlyReading(row.hardcover_token, userBook.id);
+    return { calibre_book_id: existingId, users };
+  }
+
+  const filename = safeFilename(`${title} - ${author || "Unknown"} - anna-${candidate.hash.slice(0, 12)}`);
+  const downloadPath = downloadCandidate(candidate, filename);
+  const [book] = system.importFiles([downloadPath], {
+    users: [row.slug],
+    annaMd5: candidate.hash,
+    title,
+    authors: author ? [author] : []
+  });
+  await moveToCurrentlyReading(row.hardcover_token, userBook.id);
+  return book;
 }
 
 async function syncUser(row, options = {}) {
@@ -146,10 +165,6 @@ async function syncUser(row, options = {}) {
     const title = (book.title || "").trim();
     const author = authors(book);
     if (!title) continue;
-    if (config.hardcoverDailyDownloadCap > 0 && state.dailyCount() >= config.hardcoverDailyDownloadCap) {
-      console.log(`Daily Anna download cap reached: ${state.dailyCount()}/${config.hardcoverDailyDownloadCap}`);
-      break;
-    }
     try {
       console.log(`${row.slug}: searching ${title}${author ? ` by ${author}` : ""}`);
       const candidate = findCandidate(title, author);
@@ -158,9 +173,7 @@ async function syncUser(row, options = {}) {
         processedCount += 1;
         continue;
       }
-      const filename = safeFilename(`${title} - ${author || "Unknown"} - hardcover-${userBook.id}`);
-      downloadAndImport(candidate, filename);
-      await moveToCurrentlyReading(row.hardcover_token, userBook.id);
+      await fulfillRequest(row, userBook, title, author, candidate);
       console.log(`fulfilled: ${title}`);
       processedCount += 1;
     } catch (error) {

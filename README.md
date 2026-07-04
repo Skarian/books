@@ -1,14 +1,14 @@
 # Books
 
-Books is a self-hosted EPUB reading stack. A shared Calibre library serves books through OPDS. A KOReader-compatible sync server tracks reading progress per user. Users pick up where they left off across any supported reader app or device.
+Books is a self-hosted EPUB reading stack. One Calibre library serves per-user OPDS catalogs. A KOReader-compatible sync server tracks reading progress per user. Users pick up where they left off across any supported reader app or device.
 
 The stack runs on Docker Compose. It targets Readest, KOReader, and CrossPoint on XTEink e-ink devices.
 
 ## Reading experience
 
-A user reads a few chapters on their phone, puts it down, and picks up an XTEink device later. They open the same book in CrossPoint and land close to where they left off. The library is the same for everyone. The position is private to each user.
+A user reads a few chapters on their phone, puts it down, and picks up an XTEink device later. They open the same book in CrossPoint and land close to where they left off. Each user sees only the books granted to their Books login. The position is private to each user.
 
-Books come from the shared OPDS catalog at `https://books.example.com/catalog`. Any OPDS-capable reader app can browse and download from there. Reading position is tracked through KOSync at `https://books.example.com/kosync`. Apps that support KOReader sync update position automatically after each reading session.
+Books come from the OPDS catalog at `https://books.example.com/catalog`. Any OPDS-capable reader app can browse and download the books visible to that login. Reading position is tracked through KOSync at `https://books.example.com/kosync`. Apps that support KOReader sync update position automatically after each reading session.
 
 For position sync to work across devices, every device must download the same EPUB from the catalog. KOSync uses the file's content hash to match sessions across apps and platforms.
 
@@ -24,9 +24,9 @@ See [docs/device-setup.md](docs/device-setup.md) for per-app configuration steps
 
 ## Library model
 
-The library is shared. Every user sees the same catalog and can download any book. Reading progress is private: each user gets one Books login, and their sync state is stored separately under that login. KOSync is last-write-wins per login, so each user must use their own credentials.
+The Calibre database is shared for storage and metadata, but catalog visibility is per user. Each book has one or more owning user slugs; Calibre exposes only matching books to each login. Reading progress is private: each user gets one Books login, and their sync state is stored separately under that login. KOSync is last-write-wins per login, so each user must use their own credentials.
 
-Hardcover Want to Read works as a request queue when a Hardcover API token is configured for a user. A background worker checks the list every five minutes and imports a matching English EPUB into Calibre when one is found.
+Hardcover Want to Read works as a request queue when a Hardcover API token is configured for a user. A background worker checks the list every five minutes and imports or grants a matching English EPUB to that user when one is found.
 
 ## Get started
 

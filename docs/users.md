@@ -2,7 +2,7 @@
 
 ## Library model
 
-The library is shared. Every user sees the same catalog and downloads from the same Calibre database. Reading progress is private: each user has one Books login, and KOSync tracks their position under that login separately from everyone else's.
+The Calibre database is shared for storage and metadata, but catalog visibility is per user. Each book is granted to one or more user slugs, and each login only sees matching books. Reading progress is private: each user has one Books login, and KOSync tracks their position under that login separately from everyone else's.
 
 Each user account has:
 
@@ -52,21 +52,23 @@ docker compose run --rm admin users reconcile
 docker compose run --rm admin users reconcile alice
 ```
 
-`reconcile` pushes account state from `data/config/state.json` into Calibre, creates missing KOSync users, and verifies that KOSync accepts each user's Books login. Run it after restoring from backup, after manual edits to the state file, or to confirm that Calibre and KOSync are in sync with Books state.
+`reconcile` pushes account state from `data/config/state.json` into Calibre, applies per-user catalog restrictions, creates missing KOSync users, and verifies that KOSync accepts each user's Books login. Run it after restoring from backup, after manual edits to the state file, or to confirm that Calibre and KOSync are in sync with Books state.
 
 ## Import an EPUB manually
 
 Place the EPUB in a location the admin container can reach. The `data/import` directory is mounted at `/srv/books/import` inside the container:
 
+Imports must name the user who should see the book:
+
 ```bash
-docker compose run --rm admin import /srv/books/import/book.epub
+docker compose run --rm admin import --user alice /srv/books/import/book.epub
 ```
 
-Pass multiple paths to import several files in one command. Only EPUB format is supported.
+Repeat `--user` to grant the same import to more than one user. Pass multiple paths to import several files in one command. Only EPUB format is supported.
 
 ## Hardcover intake
 
-Hardcover Want to Read is the intake queue. When a Hardcover API token is configured for a user, the worker checks their Want to Read list every five minutes and imports a matching English EPUB into Calibre when one is found.
+Hardcover Want to Read is the intake queue. When a Hardcover API token is configured for a user, the worker checks their Want to Read list every five minutes and imports or grants a matching English EPUB to that user when one is found.
 
 ### Connect a Hardcover account
 
@@ -111,9 +113,9 @@ docker compose run --rm admin hardcover clear-token alice
 1. The worker reads the user's Want to Read list from the Hardcover GraphQL API.
 2. It searches Anna's Archive for candidates matching the title and author.
 3. Candidates are scored: EPUB format preferred, English language preferred, title and author token overlap weighted.
-4. If the best candidate scores above the threshold, the file is downloaded to `data/downloads/` and imported into Calibre.
-5. The Hardcover item moves from Want to Read to Currently Reading.
-6. The VM-wide daily download count increments.
+4. If the best candidate scores above the threshold, an existing Anna match is granted or the file is downloaded to `data/downloads/` and imported into Calibre for that user.
+5. The Hardcover item moves from Want to Read to Currently Reading after the book is visible in the user's catalog.
+6. New downloads increment the VM-wide daily download count.
 
 Items with no match, a download error, or an import error are logged and stay on Want to Read. The worker retries on the next five-minute cycle.
 

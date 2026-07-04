@@ -24,6 +24,25 @@ function ensureDir(dir, mode = 0o750) {
   fs.mkdirSync(dir, { recursive: true, mode });
 }
 
+function withDirLock(name, callback) {
+  const lockDir = path.join(config.configDir, `${name}.lock`);
+  fs.mkdirSync(config.configDir, { recursive: true });
+  for (let i = 0; ; i += 1) {
+    try {
+      fs.mkdirSync(lockDir);
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST" || i === 400) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+  try {
+    return callback();
+  } finally {
+    fs.rmSync(lockDir, { recursive: true, force: true });
+  }
+}
+
 function secrets(create = false) {
   let data = {};
   if (fs.existsSync(config.secretsFile)) {
@@ -32,7 +51,7 @@ function secrets(create = false) {
     throw new Error("Run `docker compose run --rm admin bootstrap` before this command.");
   }
   if (!data.calibre_admin_password && create) {
-    data.calibre_admin_password = crypto.randomBytes(24).toString("base64url");
+    data.calibre_admin_password = crypto.randomBytes(24).toString("hex");
     fs.writeFileSync(config.secretsFile, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
   }
   return data;
@@ -63,6 +82,64 @@ function calibreSetUser(user, password, readonly) {
   run("calibre-server", ["--userdb", config.userDb, "--manage-users", "--", "change_set_password", user, readonly ? "reset" : "set"]);
 }
 
+function calibredb(args, options = {}) {
+  const passwordDir = fs.mkdtempSync(path.join(os.tmpdir(), "books-calibre-"));
+  const passwordFile = path.join(passwordDir, "password");
+  fs.writeFileSync(passwordFile, calibreAdminPassword(), { mode: 0o600 });
+  try {
+    return run("calibredb", [
+      "--with-library", options.library || `${config.calibreUrl}/#${config.calibreLibraryId}`,
+      "--username", config.calibreAdminUser,
+      "--password", `<f:${passwordFile}>`,
+      ...args
+    ], options);
+  } finally {
+    fs.rmSync(passwordDir, { recursive: true, force: true });
+  }
+}
+
+function parseBookIds(output) {
+  const match = String(output || "").match(/(?:Added|Merged) book ids:\s*([0-9,\s]+)/);
+  return match ? match[1].split(/[,\s]+/).filter(Boolean).map((id) => Number(id)) : [];
+}
+
+function ensureOwnershipColumn() {
+  const result = calibredb(["custom_columns"], { check: false });
+  if (result.status === 0 && /\bbooks_users\b/.test(result.stdout)) return;
+  const local = run("calibredb", ["--with-library", config.libraryDir, "custom_columns"], { check: false });
+  if (local.status === 0 && /\bbooks_users\b/.test(local.stdout)) return;
+  const add = run("calibredb", ["--with-library", config.libraryDir, "add_custom_column", "books_users", "Books Users", "text", "--is-multiple"], { check: false });
+  if (add.status !== 0 && !/(books_users|UNIQUE constraint failed: custom_columns\.label)/i.test(`${add.stdout}\n${add.stderr}`)) {
+    throw new Error([add.stdout, add.stderr].filter(Boolean).join("\n").trim() || "Could not create Calibre ownership column.");
+  }
+}
+
+function setCalibreRestrictions(user, restriction) {
+  const restrictions = restriction ? { library_restrictions: { [config.calibreLibraryId]: restriction } } : { library_restrictions: {} };
+  run("calibre-debug", ["-c", [
+    "from calibre.srv.users import UserManager",
+    `m=UserManager(${JSON.stringify(config.userDb)})`,
+    `m.update_user_restrictions(${JSON.stringify(user)}, ${JSON.stringify(restrictions)})`
+  ].join(";")]);
+}
+
+function findBookByAnna(annaMd5) {
+  if (!annaMd5) return null;
+  const result = calibredb(["search", `identifiers:anna:${annaMd5}`], { check: false });
+  if (result.status !== 0 && !/No books matching/i.test(`${result.stdout}\n${result.stderr}`)) {
+    const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+    throw new Error(output || `Calibre search failed: ${annaMd5}`);
+  }
+  return String(result.stdout || "").split(/[,\s]+/).map((id) => Number(id)).find(Number.isSafeInteger) || null;
+}
+
+function grantBookVisibility(calibreBookId, users) {
+  ensureOwnershipColumn();
+  const slugs = state.validateUsers(users);
+  for (const slug of slugs) calibredb(["set_custom", "--append", "books_users", String(calibreBookId), slug]);
+  return slugs;
+}
+
 async function kosyncAuth(user, rawPassword) {
   const response = await fetch(`${config.kosyncInternalUrl}/users/auth`, {
     headers: {
@@ -91,11 +168,15 @@ async function kosyncCreateUser(user, rawPassword) {
 
 async function reconcileAccount(row) {
   calibreSetUser(row.slug, row.books_password, true);
+  setCalibreRestrictions(row.slug, `#books_users:"=${row.slug}"`);
   await kosyncCreateUser(row.slug, row.books_password);
   return `reconciled user ${row.slug}`;
 }
 
 async function reconcile(slug) {
+  calibreSetUser(config.calibreAdminUser, calibreAdminPassword(true), false);
+  setCalibreRestrictions(config.calibreAdminUser, null);
+  ensureOwnershipColumn();
   const rows = slug ? [state.getAccount(slug)] : state.listAccounts();
   const output = [];
   for (const row of rows) output.push(await reconcileAccount(row));
@@ -114,31 +195,33 @@ function annas(args, options = {}) {
   return run(config.annasBin, args, { ...options, env });
 }
 
-function importFiles(files) {
+function importFiles(files, options = {}) {
+  const users = state.validateUsers(options.users || []);
+  if (!users.length) throw new Error("Import requires at least one --user owner.");
   ensureDir(config.libraryDir, 0o770);
-  const passwordDir = fs.mkdtempSync(path.join(os.tmpdir(), "books-calibre-"));
-  const passwordFile = path.join(passwordDir, "password");
-  fs.writeFileSync(passwordFile, calibreAdminPassword(), { mode: 0o600 });
-  const libraryUrl = `${config.calibreUrl}/#${config.calibreLibraryId}`;
-  try {
+  return withDirLock("calibre-write", () => {
+    const imported = [];
     for (const input of files) {
       if (!fs.existsSync(input) || !fs.statSync(input).isFile()) throw new Error(`Not a file: ${input}`);
       const extension = path.extname(input).slice(1).toLowerCase();
       if (extension !== "epub") throw new Error(`Only EPUB imports are supported: ${input}`);
-      run("calibredb", [
-        "--with-library", libraryUrl,
-        "--username", config.calibreAdminUser,
-        "--password", `<f:${passwordFile}>`,
-        "add",
-        "--automerge", "overwrite",
-        "--languages", config.defaultLanguage,
-        "--tags", config.defaultTags,
-        input
-      ]);
+      const title = options.title || path.basename(input, path.extname(input));
+      let calibreBookId = findBookByAnna(options.annaMd5);
+      if (!calibreBookId) {
+        const args = ["add", "--automerge", "overwrite", "--languages", config.defaultLanguage, "--tags", config.defaultTags];
+        if (options.title) args.push("--title", options.title);
+        if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
+        if (options.annaMd5) args.push("--identifier", `anna:${options.annaMd5}`);
+        const result = calibredb([...args, input]);
+        const ids = parseBookIds(`${result.stdout}\n${result.stderr}`);
+        if (ids.length !== 1) throw new Error(`Could not determine imported Calibre book id for ${input}`);
+        calibreBookId = ids[0];
+      }
+      const granted = grantBookVisibility(calibreBookId, users);
+      imported.push({ calibre_book_id: calibreBookId, users: granted, title });
     }
-  } finally {
-    fs.rmSync(passwordDir, { recursive: true, force: true });
-  }
+    return imported;
+  });
 }
 
 function bootstrap() {
@@ -148,7 +231,9 @@ function bootstrap() {
     path.join(config.logDir, "kosync", "redis"), path.join(config.logDir, "kosync", "app")
   ]) ensureDir(dir, dir === config.configDir || dir === config.logDir ? 0o750 : 0o770);
   calibreSetUser(config.calibreAdminUser, calibreAdminPassword(true), false);
+  setCalibreRestrictions(config.calibreAdminUser, null);
   run("calibredb", ["--with-library", config.libraryDir, "list"], { check: false });
+  ensureOwnershipColumn();
 }
 
 async function fetchOk(url, options = {}) {
@@ -175,5 +260,7 @@ module.exports = {
   reconcile,
   annas,
   importFiles,
+  findBookByAnna,
+  grantBookVisibility,
   health
 };

@@ -37,6 +37,8 @@ services:
       - "10"
       - --book-list-mode
       - details_list
+      - --ignored-fields
+      - "#books_users"
       - --max-opds-items
       - "100"
       - --max-opds-ungrouped-items
