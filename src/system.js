@@ -133,6 +133,23 @@ function findBookByAnna(annaMd5) {
   return String(result.stdout || "").split(/[,\s]+/).map((id) => Number(id)).find(Number.isSafeInteger) || null;
 }
 
+function finalizedImportCopy(input, options) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "books-import-"));
+  const output = path.join(tempDir, path.basename(input));
+  try {
+    fs.copyFileSync(input, output);
+    const args = [output, "--tags", config.defaultTags, "--language", config.defaultLanguage];
+    if (options.title) args.push("--title", options.title);
+    if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
+    if (options.annaMd5) args.push("--identifier", `anna:${options.annaMd5}`);
+    run("ebook-meta", args);
+    return { path: output, cleanup: () => fs.rmSync(tempDir, { recursive: true, force: true }) };
+  } catch (error) {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 function grantBookVisibility(calibreBookId, users) {
   ensureOwnershipColumn();
   const slugs = state.validateUsers(users);
@@ -208,14 +225,19 @@ function importFiles(files, options = {}) {
       const title = options.title || path.basename(input, path.extname(input));
       let calibreBookId = findBookByAnna(options.annaMd5);
       if (!calibreBookId) {
+        const finalized = finalizedImportCopy(input, options);
         const args = ["add", "--automerge", "overwrite", "--languages", config.defaultLanguage, "--tags", config.defaultTags];
         if (options.title) args.push("--title", options.title);
         if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
         if (options.annaMd5) args.push("--identifier", `anna:${options.annaMd5}`);
-        const result = calibredb([...args, input]);
-        const ids = parseBookIds(`${result.stdout}\n${result.stderr}`);
-        if (ids.length !== 1) throw new Error(`Could not determine imported Calibre book id for ${input}`);
-        calibreBookId = ids[0];
+        try {
+          const result = calibredb([...args, finalized.path]);
+          const ids = parseBookIds(`${result.stdout}\n${result.stderr}`);
+          if (ids.length !== 1) throw new Error(`Could not determine imported Calibre book id for ${input}`);
+          calibreBookId = ids[0];
+        } finally {
+          finalized.cleanup();
+        }
       }
       const granted = grantBookVisibility(calibreBookId, users);
       imported.push({ calibre_book_id: calibreBookId, users: granted, title });

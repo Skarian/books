@@ -82,6 +82,8 @@ KOSync is last-write-wins. A stale device that syncs after a more recent session
 
 Readest uses file-content checksum matching. KOReader uses binary matching. Both produce a stable hash from the same EPUB file, which is why every device needs to download the book from OPDS rather than sideloading a different copy.
 
+The stored EPUB in the Calibre library is the sync artifact. New imports are finalized with Calibre's `ebook-meta` before they enter the library, then Calibre serves stored file bytes for `/get/...` downloads instead of rewriting metadata at request time. OPDS/search metadata remains Calibre database driven. Replacing, converting, or rewriting a stored EPUB changes its KOSync identity.
+
 ## Hardcover worker
 
 The `worker` container runs a loop:
