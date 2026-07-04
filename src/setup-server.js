@@ -1,6 +1,7 @@
 const fs = require("fs");
 const http = require("http");
 const koreader = require("./koreader");
+const readest = require("./readest");
 const state = require("./state");
 
 function unauthorized(res) {
@@ -35,40 +36,56 @@ function requestedBundle(req) {
     const parts = new URL(req.url, "http://books.local").pathname.split("/").filter(Boolean);
     if (parts.length !== 2 || parts[0] !== "setup") return null;
     const name = decodeURIComponent(parts[1]);
-    return koreader.BUNDLES[name] ? { name } : null;
+    if (koreader.BUNDLES[name]) return { name, generator: koreader };
+    if (name === "readest.zip") return { name, generator: readest };
+    return null;
   } catch {
     return null;
   }
 }
 
-function isKoreaderPage(req) {
+function isPage(req, paths) {
   try {
-    return ["/koreader", "/koreader/"].includes(new URL(req.url, "http://books.local").pathname);
+    return paths.includes(new URL(req.url, "http://books.local").pathname);
   } catch {
     return false;
   }
 }
 
-function setupPage() {
+function page(title, body) {
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KOReader setup</title>
+<title>${title}</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:42rem;margin:3rem auto;padding:0 1rem;line-height:1.45}
 a{display:block;margin:.75rem 0;padding:.85rem 1rem;border:1px solid #ccc;border-radius:6px;color:#111;text-decoration:none}
 </style>
 </head>
 <body>
+${body}
+</body>
+</html>
+`;
+}
+
+function koreaderPage() {
+  return page("KOReader setup", `
 <h1>KOReader setup</h1>
 <p>Download the setup ZIP for this device, extract it at the device storage root, then restart KOReader.</p>
 <a href="/setup/koreader-android-kindle.zip">Android (GitHub APK) or Kindle</a>
 <a href="/setup/koreader-kobo.zip">Kobo</a>
-</body>
-</html>
-`;
+`);
+}
+
+function readestPage() {
+  return page("Readest setup", `
+<h1>Readest setup</h1>
+<p>Download the restore ZIP, then in Readest use Advanced Settings -> Backup & Restore -> Restore Library.</p>
+<a href="/setup/readest.zip">Readest restore ZIP</a>
+`);
 }
 
 function serve(req, res, options = {}) {
@@ -77,14 +94,14 @@ function serve(req, res, options = {}) {
     res.end("not found\n");
     return;
   }
-  if (isKoreaderPage(req)) {
+  if (isPage(req, ["/koreader", "/koreader/"]) || isPage(req, ["/readest", "/readest/"])) {
     const row = authenticatedAccount(req);
     if (!row) return unauthorized(res);
     res.writeHead(200, {
       "Cache-Control": "private, no-store",
       "Content-Type": "text/html; charset=utf-8"
     });
-    res.end(setupPage());
+    res.end(isPage(req, ["/readest", "/readest/"]) ? readestPage() : koreaderPage());
     return;
   }
   const bundle = requestedBundle(req);
@@ -97,7 +114,7 @@ function serve(req, res, options = {}) {
   if (!row) return unauthorized(res);
   let output;
   try {
-    output = koreader.generate(row, bundle.name, options);
+    output = bundle.generator.generate(row, bundle.name, options);
   } catch {
     res.writeHead(502, { "Cache-Control": "private, no-store" });
     res.end("setup generation failed\n");
@@ -114,7 +131,7 @@ function serve(req, res, options = {}) {
   const clean = () => {
     if (cleaned) return;
     cleaned = true;
-    koreader.cleanup(output);
+    bundle.generator.cleanup(output);
   };
   res.on("finish", clean);
   res.on("close", clean);
