@@ -29,6 +29,23 @@ function fixtureFile() {
   return { file, data };
 }
 
+async function withFetch(fetch, callback) {
+  const previous = global.fetch;
+  global.fetch = fetch;
+  try {
+    return await callback();
+  } finally {
+    global.fetch = previous;
+  }
+}
+
+function annaStats(statsByHash) {
+  return async (url) => {
+    const hash = String(url).split("/").pop();
+    return { ok: true, json: async () => statsByHash[hash] || {} };
+  };
+}
+
 test("KOReader document hash uses the binary partial MD5 sampling", () => {
   const { system } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
   const { file, data } = fixtureFile();
@@ -67,6 +84,7 @@ test("Anna candidate gate fails closed on weak title evidence", () => {
   const base = { authors: "Jeffrey Pfeffer", language: "English", format: "EPUB", hash: "hash" };
   assert.equal(hardcover._test.isEligibleCandidate({ ...base, title: "Power : why some people have it-- and others don't" }, "Power", "Jeffrey Pfeffer"), true);
   assert.equal(hardcover._test.isEligibleCandidate({ ...base, title: "7 Rules of Power : Surprising Advice" }, "Power", "Jeffrey Pfeffer"), false);
+  assert.equal(hardcover._test.isEligibleCandidate({ ...base, title: "The Power of Habit" }, "Power", "Jeffrey Pfeffer"), false);
   assert.equal(hardcover._test.isEligibleCandidate({
     title: "快思慢想 = Thinking, Fast and Slow",
     authors: "康納曼 (Daniel Kahneman)",
@@ -74,6 +92,108 @@ test("Anna candidate gate fails closed on weak title evidence", () => {
     format: "EPUB",
     hash: "hash"
   }, "Thinking, Fast and Slow", "Daniel Kahneman"), false);
+});
+
+test("Anna candidate title identity tolerates common release naming", () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const base = { authors: "George Orwell", language: "English", format: "EPUB", hash: "hash" };
+  assert.equal(hardcover._test.isEligibleCandidate({ ...base, title: "George Orwell - 1984" }, "1984", "George Orwell"), true);
+  assert.equal(hardcover._test.isEligibleCandidate({ ...base, title: "Orwell, George - 1984 (Penguin)" }, "1984", "George Orwell"), true);
+  assert.equal(hardcover._test.isEligibleCandidate({ ...base, title: "Animal Farm and 1984" }, "1984", "George Orwell"), false);
+  assert.equal(hardcover._test.isEligibleCandidate({ ...base, title: "Dune Messiah", authors: "Frank Herbert" }, "Dune", "Frank Herbert"), false);
+  assert.equal(hardcover._test.titleIdentityScore("George Orwell - 1984", "1984", "George Orwell"), 100);
+});
+
+test("Anna candidate ranking uses popularity only after identity eligibility", async () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const base = { authors: "Jeffrey Pfeffer", language: "English", format: "EPUB" };
+  const picked = await withFetch(annaStats({ wrong: { downloads_total: 999999 }, right: { downloads_total: 1 } }), () => hardcover._test.selectCandidate([
+    { ...base, hash: "wrong", title: "7 Rules of Power : Surprising Advice" },
+    { ...base, hash: "right", title: "Power : why some people have it-- and others don't" }
+  ], "Power", "Jeffrey Pfeffer"));
+  assert.equal(picked.hash, "right");
+});
+
+test("Anna candidate ranking prefers higher-download eligible files", async () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const base = { title: "Thinking, Fast and Slow", authors: "Daniel Kahneman", language: "English", format: "EPUB" };
+  const picked = await withFetch(annaStats({ low: { downloads_total: 10 }, high: { downloads_total: 1000 } }), () => hardcover._test.selectCandidate([
+    { ...base, hash: "low" },
+    { ...base, hash: "high" }
+  ], "Thinking, Fast and Slow", "Daniel Kahneman"));
+  assert.equal(picked.hash, "high");
+});
+
+test("Anna candidate ranking treats stats failures as neutral", async () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const base = { title: "Power", authors: "Jeffrey Pfeffer", language: "English", format: "EPUB" };
+  const picked = await withFetch(async () => { throw new Error("stats unavailable"); }, () => hardcover._test.selectCandidate([
+    { ...base, hash: "first" },
+    { ...base, hash: "second" }
+  ], "Power", "Jeffrey Pfeffer"));
+  assert.equal(picked.hash, "first");
+});
+
+test("Anna candidate ranking caches duplicate MD5 stats", async () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  let fetches = 0;
+  const picked = await withFetch(async () => {
+    fetches += 1;
+    return { ok: true, json: async () => ({ downloads_total: 1 }) };
+  }, () => hardcover._test.selectCandidate([
+    { title: "Foo Bar Extra", authors: "Alice Brown", language: "English", format: "EPUB", hash: "same" },
+    { title: "Foo Bar", authors: "Alice Brown", language: "English", format: "EPUB", hash: "same" }
+  ], "Foo Bar", "Alice Brown"));
+  assert.equal(picked.title, "Foo Bar Extra");
+  assert.equal(fetches, 1);
+});
+
+test("Hardcover fulfillment reuses exact stored Hardcover ids only", async () => {
+  const { hardcover, system } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const original = { ...system };
+  const identifiers = [];
+  Object.assign(system, {
+    findBookByIdentifier: (key, value) => key === "hardcover" && Number(value) === 42 ? 99 : null,
+    grantBookVisibility: (id, users) => (assert.equal(id, 99), users),
+    addIdentifier: (id, key, value) => identifiers.push({ id, key, value }),
+    importFiles: () => { throw new Error("existing book should not import"); }
+  });
+  try {
+    const result = await withFetch(async () => ({ ok: true, json: async () => ({ data: { update_user_book: { id: 7 } } }) }), () =>
+      hardcover._test.fulfillRequest({ slug: "alice", hardcover_token: "token" }, { id: 7, book_id: 42 }, "Power", "Jeffrey Pfeffer", { hash: "abc" }));
+    assert.equal(result.calibre_book_id, 99);
+    assert.deepEqual(identifiers, [{ id: 99, key: "hardcover", value: 42 }]);
+  } finally {
+    Object.assign(system, original);
+  }
+});
+
+test("Hardcover fulfillment downloads new books with title filenames", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-"));
+  const { hardcover, system } = load(dir);
+  const original = { ...system };
+  let importedPath;
+  Object.assign(system, {
+    findBookByIdentifier: () => null,
+    annas: (_args, options) => {
+      const filename = _args[2];
+      fs.mkdirSync(path.join(dir, "downloads"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "downloads", filename), "epub");
+      return { status: 0, stdout: "", stderr: "", ...options };
+    },
+    importFiles: (files) => {
+      importedPath = files[0];
+      return [{ calibre_book_id: 55, users: ["alice"] }];
+    },
+    addIdentifier: () => {}
+  });
+  try {
+    await withFetch(async () => ({ ok: true, json: async () => ({ data: { update_user_book: { id: 7 } } }) }), () =>
+      hardcover._test.fulfillRequest({ slug: "alice", hardcover_token: "token" }, { id: 7, book_id: 42 }, "Power", "Jeffrey Pfeffer", { hash: "abc" }));
+    assert.equal(path.basename(importedPath), "Power.epub");
+  } finally {
+    Object.assign(system, original);
+  }
 });
 
 test("progress push dry-run creates only from exact identifiers", async () => {

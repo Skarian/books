@@ -103,9 +103,9 @@ Each `hardcover sync` pass:
 
 1. Reads the Want to Read list from the Hardcover GraphQL API for each user with a configured token.
 2. Searches Anna's Archive for candidates via the `annas-mcp` CLI binary.
-3. Scores each candidate: EPUB format (+100), English language (+50), title/author token overlap (+3 per matching token with length > 3), has a download hash (+1). Non-EPUB and non-English candidates are penalized.
-4. Skips the item if the best candidate is not confident enough.
-5. Grants an existing Anna match to the requesting user, or downloads the winning file to `data/downloads/` and imports it into Calibre for that user.
+3. Keeps only English EPUB candidates whose normalized title and author match the request.
+4. Ranks eligible candidates by Anna download count, great-quality votes, list count, report count, and original search order.
+5. Grants an existing `hardcover:<book_id>` match to the requesting user, or downloads the winning file to `data/downloads/` as `<title>.epub` and imports it into Calibre for that user.
 6. Stores the Hardcover `book_id` in Calibre identifiers as `hardcover:<book_id>` so later progress pushes can match the same Hardcover book without relying on ISBN.
 7. Moves the Hardcover item from Want to Read to Currently Reading after the catalog grant succeeds.
 8. If a new file was downloaded, increments the VM-wide daily download counter in `state.json`.

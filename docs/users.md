@@ -124,8 +124,8 @@ docker compose run --rm admin hardcover clear-token alice
 
 1. The worker reads the user's Want to Read list from the Hardcover GraphQL API.
 2. It searches Anna's Archive for candidates matching the title and author.
-3. Candidates are scored: EPUB format preferred, English language preferred, title and author token overlap weighted.
-4. If the best candidate scores above the threshold, an existing Anna match is granted or the file is downloaded to `data/downloads/` and imported into Calibre for that user.
+3. It keeps only English EPUB candidates whose normalized title and author match the request.
+4. It ranks eligible candidates by Anna download count, great-quality votes, list count, report count, and original search order; the winner is granted if the Hardcover book is already present, otherwise downloaded as `<title>.epub` and imported.
 5. The Calibre book records the Hardcover `book_id` as a `hardcover` identifier for future progress matching.
 6. The Hardcover item moves from Want to Read to Currently Reading after the book is visible in the user's catalog.
 7. New downloads increment the VM-wide daily download count.

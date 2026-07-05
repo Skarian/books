@@ -10,6 +10,7 @@ const CURRENTLY_READING_STATUS = 2;
 const PROGRESS_THRESHOLD = 0.01;
 const TITLE_STOPWORDS = new Set(["a", "an", "and", "are", "as", "at", "by", "for", "from", "has", "have", "in", "into", "it", "of", "on", "or", "the", "to", "with"]);
 const AUTHOR_SUFFIXES = new Set(["jr", "sr", "ii", "iii", "iv"]);
+const ANNA_STATS = ["downloads_total", "great_quality_count", "lists_count", "reports_count"];
 
 function normalizeToken(token) {
   const trimmed = String(token || "").trim();
@@ -109,6 +110,17 @@ function hasAsciiLeadingTitle(value) {
   return /^[A-Za-z0-9]/.test(String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/^[\s"'([{<]+/, ""));
 }
 
+function titleVariants(value) {
+  const text = String(value || "");
+  const variants = [text, text.replace(/[\[(（].*$/, "")];
+  for (const part of variants.slice()) {
+    variants.push(part.split(/[:：]/)[0]);
+    const pieces = part.split(/\s+-\s+|--+/);
+    if (pieces.length > 1) variants.push(pieces[0], pieces[pieces.length - 1]);
+  }
+  return variants;
+}
+
 function authorSurnames(author) {
   return String(author || "").split(/\s*(?:,|&|\band\b)\s*/i).map((name) => {
     const tokens = meaningfulTokens(name).filter((token) => !AUTHOR_SUFFIXES.has(token));
@@ -116,15 +128,26 @@ function authorSurnames(author) {
   }).filter(Boolean);
 }
 
+function authorTokens(author) {
+  return new Set(meaningfulTokens(author).filter((token) => !AUTHOR_SUFFIXES.has(token)));
+}
+
+function titleIdentityScore(candidateTitle, title, author) {
+  const wanted = meaningfulTokens(title);
+  if (!wanted.length) return 0;
+  const authorWords = authorTokens(author);
+  for (const token of wanted) authorWords.delete(token);
+  return Math.max(0, ...titleVariants(candidateTitle).map((variant) => {
+    const tokens = meaningfulTokens(variant).filter((token) => !authorWords.has(token));
+    return wanted.every((token) => tokens.includes(token)) ? Math.round((100 * wanted.length) / tokens.length) : 0;
+  }));
+}
+
 function isEligibleCandidate(item, title, author) {
   if (!item.hash || String(item.format || "").trim().toLowerCase() !== "epub") return false;
   if (!["english", "eng", "en"].includes(String(item.language || "").trim().toLowerCase())) return false;
   if (hasAsciiLeadingTitle(title) && !hasAsciiLeadingTitle(item.title)) return false;
-
-  const titleTokens = meaningfulTokens(title);
-  const candidateTitleTokens = tokenSet(item.title);
-  if (!titleTokens.length || candidateTitleTokens.values().next().value !== titleTokens[0]) return false;
-  if (!titleTokens.every((token) => candidateTitleTokens.has(token))) return false;
+  if (titleIdentityScore(item.title, title, author) < 60) return false;
 
   if (String(author || "").trim()) {
     const surnames = authorSurnames(author);
@@ -134,25 +157,63 @@ function isEligibleCandidate(item, title, author) {
   return true;
 }
 
-function scoreCandidate(item, title, author) {
-  const candidateTitleTokens = tokenSet(item.title);
-  const candidateAuthorTokens = tokenSet(item.authors);
-  let score = 0;
-  for (const token of meaningfulTokens(title)) if (candidateTitleTokens.has(token)) score += 3;
-  for (const token of authorSurnames(author)) if (candidateAuthorTokens.has(token)) score += 2;
-  return score;
+function annaStat(item, key) {
+  return Number(item._annaStats?.[key] || 0);
 }
 
-function findCandidate(title, author) {
+function neutralAnnaStats() {
+  return Object.fromEntries(ANNA_STATS.map((key) => [key, 0]));
+}
+
+async function fetchAnnaStats(hash, cache = new Map()) {
+  if (cache.has(hash)) return cache.get(hash);
+  const promise = (async () => {
+    const stats = neutralAnnaStats();
+    try {
+      const host = String(config.annasBaseUrl || "annas-archive.gl").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const response = await fetch(`https://${host}/dyn/md5/inline_info/${encodeURIComponent(hash)}`, {
+        headers: { Accept: "text/css", "User-Agent": "books/1.0" }
+      });
+      if (response.ok) {
+        const payload = await response.json();
+        for (const key of ANNA_STATS) stats[key] = Number(payload[key]) || 0;
+      }
+    } catch {
+    }
+    return stats;
+  })();
+  cache.set(hash, promise);
+  return promise;
+}
+
+function compareCandidates(a, b) {
+  for (const delta of [
+    annaStat(b, "downloads_total") - annaStat(a, "downloads_total"),
+    annaStat(b, "great_quality_count") - annaStat(a, "great_quality_count"),
+    annaStat(b, "lists_count") - annaStat(a, "lists_count"),
+    annaStat(a, "reports_count") - annaStat(b, "reports_count"),
+    a._annaRank - b._annaRank
+  ]) if (delta) return delta;
+  return 0;
+}
+
+async function selectCandidate(items, title, author) {
+  const candidates = items.map((item, index) => ({ ...item, _annaRank: index }))
+    .filter((item) => isEligibleCandidate(item, title, author));
+  const cache = new Map();
+  await Promise.all(candidates.map(async (item) => {
+    item._annaStats = await fetchAnnaStats(item.hash, cache);
+  }));
+  candidates.sort(compareCandidates);
+  if (!candidates.length) throw new Error(`No English EPUB candidate found for ${title}`);
+  return candidates[0];
+}
+
+async function findCandidate(title, author) {
   const query = `${title} ${author} epub english`.trim();
   const result = system.annas(["book-search", query], { check: false });
   if (result.status !== 0) throw new Error(result.stderr || result.stdout || `Anna search failed for ${title}`);
-  const candidates = parseAnnaBlocks(result.stdout).filter((item) => isEligibleCandidate(item, title, author));
-  candidates.sort((a, b) => scoreCandidate(b, title, author) - scoreCandidate(a, title, author));
-  if (!candidates.length) {
-    throw new Error(`No English EPUB candidate found for ${title}`);
-  }
-  return candidates[0];
+  return selectCandidate(parseAnnaBlocks(result.stdout), title, author);
 }
 
 function downloadCandidate(candidate, filename) {
@@ -363,7 +424,7 @@ async function pushReadingProgress(row, options = {}) {
 }
 
 async function fulfillRequest(row, userBook, title, author, candidate) {
-  const existingId = system.findBookByAnna(candidate.hash);
+  const existingId = system.findBookByIdentifier("hardcover", userBook.book_id);
   if (existingId) {
     const users = system.grantBookVisibility(existingId, [row.slug]);
     system.addIdentifier(existingId, "hardcover", userBook.book_id);
@@ -371,7 +432,7 @@ async function fulfillRequest(row, userBook, title, author, candidate) {
     return { calibre_book_id: existingId, users };
   }
 
-  const filename = safeFilename(`${title} - ${author || "Unknown"} - anna-${candidate.hash.slice(0, 12)}`);
+  const filename = safeFilename(title);
   const downloadPath = downloadCandidate(candidate, filename);
   const [book] = system.importFiles([downloadPath], {
     users: [row.slug],
@@ -396,7 +457,7 @@ async function syncUser(row, options = {}) {
     if (!title) continue;
     try {
       console.log(`${row.slug}: searching ${title}${author ? ` by ${author}` : ""}`);
-      const candidate = findCandidate(title, author);
+      const candidate = await findCandidate(title, author);
       if (options.dryRun) {
         console.log(`dry-run candidate: ${candidate.hash} ${candidate.format} ${candidate.language} ${candidate.title}`);
         processedCount += 1;
@@ -446,6 +507,9 @@ module.exports = {
     isbnValues,
     progressPages,
     progressTime,
-    pushReadingProgress
+    pushReadingProgress,
+    selectCandidate,
+    titleIdentityScore,
+    fulfillRequest
   }
 };
