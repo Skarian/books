@@ -55,12 +55,16 @@ Manual setup:
 
 ## CrossPoint (XTEink)
 
+If the owner sent the CrossPoint setup page, open it, sign in with your Books username and password, download the ZIP, extract it at the SD card root, and restart CrossPoint.
+
+Manual setup:
+
 1. Add an OPDS catalog at `https://books.example.com/catalog`.
 2. Sign in with your Books username and password.
 3. Download the EPUB from the catalog.
 4. Set the sync server to `https://books.example.com/kosync`.
 5. Sign in with the same Books username and password.
-6. Use binary or file-content document matching if the option is visible.
+6. Set document matching to **binary**.
 
 ---
 

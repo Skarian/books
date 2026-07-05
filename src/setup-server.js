@@ -1,5 +1,6 @@
 const fs = require("fs");
 const http = require("http");
+const crosspoint = require("./crosspoint");
 const koreader = require("./koreader");
 const readest = require("./readest");
 const state = require("./state");
@@ -37,6 +38,7 @@ function requestedBundle(req) {
     if (parts.length !== 2 || parts[0] !== "setup") return null;
     const name = decodeURIComponent(parts[1]);
     if (koreader.BUNDLES[name]) return { name, generator: koreader };
+    if (name === "crosspoint.zip") return { name, generator: crosspoint };
     if (name === "readest.zip") return { name, generator: readest };
     return null;
   } catch {
@@ -88,20 +90,29 @@ function readestPage() {
 `);
 }
 
+function crosspointPage() {
+  return page("CrossPoint setup", `
+<h1>CrossPoint setup</h1>
+<p>Download the setup ZIP, extract it at the SD card root, then restart CrossPoint.</p>
+<a href="/setup/crosspoint.zip">CrossPoint setup ZIP</a>
+`);
+}
+
 function serve(req, res, options = {}) {
   if (req.method !== "GET") {
     res.writeHead(404, { "Cache-Control": "private, no-store" });
     res.end("not found\n");
     return;
   }
-  if (isPage(req, ["/koreader", "/koreader/"]) || isPage(req, ["/readest", "/readest/"])) {
+  if (isPage(req, ["/koreader", "/koreader/"]) || isPage(req, ["/readest", "/readest/"]) || isPage(req, ["/crosspoint", "/crosspoint/"])) {
     const row = authenticatedAccount(req);
     if (!row) return unauthorized(res);
     res.writeHead(200, {
       "Cache-Control": "private, no-store",
       "Content-Type": "text/html; charset=utf-8"
     });
-    res.end(isPage(req, ["/readest", "/readest/"]) ? readestPage() : koreaderPage());
+    if (isPage(req, ["/readest", "/readest/"])) return res.end(readestPage());
+    res.end(isPage(req, ["/crosspoint", "/crosspoint/"]) ? crosspointPage() : koreaderPage());
     return;
   }
   const bundle = requestedBundle(req);

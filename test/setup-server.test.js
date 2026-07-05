@@ -6,7 +6,7 @@ const { Writable } = require("node:stream");
 const test = require("node:test");
 
 function resetModules() {
-  for (const mod of ["../src/setup-server", "../src/koreader", "../src/readest", "../src/system", "../src/state", "../src/config"]) {
+  for (const mod of ["../src/setup-server", "../src/crosspoint", "../src/koreader", "../src/readest", "../src/system", "../src/state", "../src/config"]) {
     delete require.cache[require.resolve(mod)];
   }
 }
@@ -88,6 +88,12 @@ test("setup server gates bundle downloads by Books account auth", async () => {
   assert.match(response.text(), /Restore Library/);
   assert.doesNotMatch(response.text(), /bob/);
 
+  response = await request(setup, "/crosspoint", auth("alice", "alice-password"), options);
+  assert.equal(response.statusCode, 200);
+  assert.match(response.text(), /\/setup\/crosspoint\.zip/);
+  assert.match(response.text(), /SD card root/);
+  assert.doesNotMatch(response.text(), /bob/);
+
   response = await request(setup, "/setup/koreader-kobo.zip", auth("alice", "alice-password"), options);
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers["Cache-Control"], "private, no-store");
@@ -96,6 +102,11 @@ test("setup server gates bundle downloads by Books account auth", async () => {
   response = await request(setup, "/setup/readest.zip", auth("alice", "alice-password"), options);
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers["Content-Disposition"], 'attachment; filename="readest.zip"');
+  assert.ok(response.text().startsWith("PK"));
+
+  response = await request(setup, "/setup/crosspoint.zip", auth("alice", "alice-password"), options);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["Content-Disposition"], 'attachment; filename="crosspoint.zip"');
   assert.ok(response.text().startsWith("PK"));
 
   response = await request(setup, "/setup/koreader-kobo.zip", auth("alice", "wrong"), options);
