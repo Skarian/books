@@ -35,6 +35,5 @@ module.exports = {
   annasBaseUrl: value("ANNAS_BASE_URL", "annas-archive.gl"),
   annasDownloadPath: downloadDir,
   hardcoverDailyDownloadCap: Number(value("HARDCOVER_DAILY_DOWNLOAD_CAP", "10")),
-  defaultLanguage: "eng",
-  defaultTags: "agent-imported"
+  defaultLanguage: "eng"
 };

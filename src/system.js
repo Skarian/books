@@ -186,16 +186,52 @@ async function kosyncProgress(row, documentHash) {
   return Number.isFinite(Number(payload.percentage)) ? { ...payload, percentage: Number(payload.percentage) } : null;
 }
 
-function finalizedImportCopy(input, options) {
+function metadataArgs(file, options = {}, localTruth = true) {
+  const args = [file];
+  if (localTruth) {
+    args.push("--language", config.defaultLanguage);
+    if (options.title) args.push("--title", options.title);
+    if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
+  }
+  if (options.isbn) args.push("--isbn", options.isbn);
+  if (options.annaMd5) args.push("--identifier", `anna:${options.annaMd5}`);
+  return args;
+}
+
+function fetchedMetadata(tempDir, options = {}) {
+  if (!options.isbn && (!options.title || !options.authors || !options.authors.length)) return {};
+  const cover = path.join(tempDir, "cover.jpg");
+  const args = ["--opf", "--cover", cover, "--timeout", "20"];
+  if (options.isbn) args.push("--isbn", options.isbn);
+  if (options.title) args.push("--title", options.title);
+  if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
+  const result = run("fetch-ebook-metadata", args, { check: false });
+  if (result.status !== 0 || !String(result.stdout || "").trim()) return {};
+  const opf = path.join(tempDir, "metadata.opf");
+  fs.writeFileSync(opf, result.stdout, { mode: 0o600 });
+  return { opf, cover };
+}
+
+function polishImportCopy(file, tempDir, cover) {
+  if (!cover || !fs.existsSync(cover) || !fs.statSync(cover).size) return;
+  const opf = path.join(tempDir, "final.opf");
+  const polished = path.join(tempDir, "polished.epub");
+  const meta = run("ebook-meta", [file, "--to-opf", opf], { check: false });
+  if (meta.status !== 0 || !fs.existsSync(opf)) return;
+  const result = run("ebook-polish", ["--opf", opf, "--cover", cover, file, polished], { check: false });
+  if (result.status === 0 && fs.existsSync(polished) && fs.statSync(polished).size) fs.copyFileSync(polished, file);
+}
+
+function finalizedImportCopy(input, options = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "books-import-"));
   const output = path.join(tempDir, path.basename(input));
   try {
     fs.copyFileSync(input, output);
-    const args = [output, "--tags", config.defaultTags, "--language", config.defaultLanguage];
-    if (options.title) args.push("--title", options.title);
-    if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
-    if (options.annaMd5) args.push("--identifier", `anna:${options.annaMd5}`);
+    const fetched = fetchedMetadata(tempDir, options);
+    const args = metadataArgs(output, options, !options.isbn);
+    if (fetched.opf) args.push("--from-opf", fetched.opf);
     run("ebook-meta", args);
+    polishImportCopy(output, tempDir, fetched.cover);
     return { path: output, cleanup: () => fs.rmSync(tempDir, { recursive: true, force: true }) };
   } catch (error) {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -278,9 +314,13 @@ function importFiles(files, options = {}) {
       const title = options.title || path.basename(input, path.extname(input));
       let calibreBookId;
       const finalized = finalizedImportCopy(input, options);
-      const args = ["add", "--automerge", "overwrite", "--languages", config.defaultLanguage, "--tags", config.defaultTags];
-      if (options.title) args.push("--title", options.title);
-      if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
+      const args = ["add", "--automerge", "new_record"];
+      if (!options.isbn) {
+        args.push("--languages", config.defaultLanguage);
+        if (options.title) args.push("--title", options.title);
+        if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
+      }
+      if (options.isbn) args.push("--isbn", options.isbn);
       if (options.annaMd5) args.push("--identifier", `anna:${options.annaMd5}`);
       try {
         const result = calibredb([...args, finalized.path]);
@@ -339,5 +379,6 @@ module.exports = {
   koreaderDocumentHash,
   kosyncProgress,
   grantBookVisibility,
-  health
+  health,
+  _test: { finalizedImportCopy }
 };

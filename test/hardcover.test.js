@@ -57,6 +57,7 @@ test("KOReader document hash uses the binary partial MD5 sampling", () => {
 test("progress conversion uses one percent or one page threshold", () => {
   const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
   assert.deepEqual(hardcover._test.isbnValues({ isbn: "978-0-061789-08-3, 1260027090" }), ["9780061789083", "1260027090"]);
+  assert.equal(hardcover._test.editionIsbn({ isbn_13: "978-0-062010-61-2", isbn_10: "0062010619" }), "9780062010612");
   assert.equal(hardcover._test.progressPages(0.023, 288), 6);
   assert.equal(hardcover._test.progressPages(0.003, 500), 1);
   assert.equal(hardcover._test.progressPages(0.003, 100), null);
@@ -173,6 +174,7 @@ test("Hardcover fulfillment downloads new books with title filenames", async () 
   const { hardcover, system } = load(dir);
   const original = { ...system };
   let importedPath;
+  let importOptions;
   Object.assign(system, {
     findBookByIdentifier: () => null,
     annas: (_args, options) => {
@@ -181,16 +183,22 @@ test("Hardcover fulfillment downloads new books with title filenames", async () 
       fs.writeFileSync(path.join(dir, "downloads", filename), "epub");
       return { status: 0, stdout: "", stderr: "", ...options };
     },
-    importFiles: (files) => {
+    importFiles: (files, options) => {
       importedPath = files[0];
+      importOptions = options;
       return [{ calibre_book_id: 55, users: ["alice"] }];
     },
     addIdentifier: () => {}
   });
   try {
     await withFetch(async () => ({ ok: true, json: async () => ({ data: { update_user_book: { id: 7 } } }) }), () =>
-      hardcover._test.fulfillRequest({ slug: "alice", hardcover_token: "token" }, { id: 7, book_id: 42 }, "Power", "Jeffrey Pfeffer", { hash: "abc" }));
+      hardcover._test.fulfillRequest({ slug: "alice", hardcover_token: "token" }, {
+        id: 7,
+        book_id: 42,
+        edition: { isbn_13: "9780062010612" }
+      }, "Power", "Jeffrey Pfeffer", { hash: "abc" }));
     assert.equal(path.basename(importedPath), "Power.epub");
+    assert.equal(importOptions.isbn, "9780062010612");
   } finally {
     Object.assign(system, original);
   }

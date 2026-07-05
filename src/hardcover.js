@@ -47,6 +47,7 @@ async function wantToRead(token) {
         user_books(where: {status_id: {_eq: 1}}, order_by: {created_at: asc}, limit: 100) {
           id
           book_id
+          edition { isbn_10 isbn_13 }
           book {
             title
             contributions { author { name } }
@@ -244,6 +245,10 @@ function isbnValues(identifiers = {}) {
     .filter((value) => value.length === 10 || value.length === 13)));
 }
 
+function editionIsbn(edition = {}) {
+  return isbnValues({ isbn: [edition.isbn_13, edition.isbn_10].filter(Boolean).join(",") })[0] || null;
+}
+
 function progressPages(percentage, pages) {
   const percent = Number(percentage);
   const total = Number(pages);
@@ -437,6 +442,7 @@ async function fulfillRequest(row, userBook, title, author, candidate) {
   const [book] = system.importFiles([downloadPath], {
     users: [row.slug],
     annaMd5: candidate.hash,
+    isbn: editionIsbn(userBook.edition),
     title,
     authors: author ? [author] : []
   });
@@ -505,6 +511,7 @@ module.exports = {
     findCandidate,
     isEligibleCandidate,
     isbnValues,
+    editionIsbn,
     progressPages,
     progressTime,
     pushReadingProgress,
