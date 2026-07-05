@@ -160,7 +160,7 @@ test("Hardcover fulfillment reuses exact stored Hardcover ids only", async () =>
     importFiles: () => { throw new Error("existing book should not import"); }
   });
   try {
-    const result = await withFetch(async () => ({ ok: true, json: async () => ({ data: { update_user_book: { id: 7 } } }) }), () =>
+    const result = await withFetch(async () => ({ ok: true, text: async () => JSON.stringify({ data: { update_user_book: { id: 7 } } }) }), () =>
       hardcover._test.fulfillRequest({ slug: "alice", hardcover_token: "token" }, { id: 7, book_id: 42 }, "Power", "Jeffrey Pfeffer", { hash: "abc" }));
     assert.equal(result.calibre_book_id, 99);
     assert.deepEqual(identifiers, [{ id: 99, key: "hardcover", value: 42 }]);
@@ -191,7 +191,7 @@ test("Hardcover fulfillment downloads new books with title filenames", async () 
     addIdentifier: () => {}
   });
   try {
-    await withFetch(async () => ({ ok: true, json: async () => ({ data: { update_user_book: { id: 7 } } }) }), () =>
+    await withFetch(async () => ({ ok: true, text: async () => JSON.stringify({ data: { update_user_book: { id: 7 } } }) }), () =>
       hardcover._test.fulfillRequest({ slug: "alice", hardcover_token: "token" }, {
         id: 7,
         book_id: 42,
@@ -201,6 +201,44 @@ test("Hardcover fulfillment downloads new books with title filenames", async () 
     assert.equal(importOptions.isbn, "9780062010612");
   } finally {
     Object.assign(system, original);
+  }
+});
+
+test("Hardcover GraphQL retries transient plain-text failures", async () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  let calls = 0;
+  const originalSetTimeout = global.setTimeout;
+  global.setTimeout = (callback) => (callback(), 0);
+  try {
+    const profile = await withFetch(async () => {
+      calls += 1;
+      return calls === 1
+        ? { ok: false, status: 503, text: async () => "no available server" }
+        : { ok: true, status: 200, text: async () => JSON.stringify({ data: { me: [{ id: 1, username: "neil" }] } }) };
+    }, () => hardcover.verifyToken("token"));
+    assert.deepEqual(profile, { id: 1, username: "neil" });
+    assert.equal(calls, 2);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+  }
+});
+
+test("Hardcover GraphQL retries transient GraphQL errors", async () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  let calls = 0;
+  const originalSetTimeout = global.setTimeout;
+  global.setTimeout = (callback) => (callback(), 0);
+  try {
+    const profile = await withFetch(async () => {
+      calls += 1;
+      return calls === 1
+        ? { ok: true, status: 200, text: async () => JSON.stringify({ errors: [{ message: "no available server" }] }) }
+        : { ok: true, status: 200, text: async () => JSON.stringify({ data: { me: [{ id: 1, username: "neil" }] } }) };
+    }, () => hardcover.verifyToken("token"));
+    assert.deepEqual(profile, { id: 1, username: "neil" });
+    assert.equal(calls, 2);
+  } finally {
+    global.setTimeout = originalSetTimeout;
   }
 });
 

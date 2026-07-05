@@ -19,19 +19,42 @@ function normalizeToken(token) {
 }
 
 async function graphql(token, query, variables = {}) {
-  const response = await fetch(GRAPHQL_URL, {
-    method: "POST",
-    headers: {
-      Authorization: normalizeToken(token),
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ query, variables })
-  });
-  const payload = await response.json();
-  if (!response.ok || payload.errors) {
-    throw new Error(JSON.stringify(payload.errors || payload, null, 2));
+  let last;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, [1000, 3000, 8000][attempt - 1]));
+    try {
+      const response = await fetch(GRAPHQL_URL, {
+        method: "POST",
+        headers: {
+          Authorization: normalizeToken(token),
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ query, variables })
+      });
+      const text = await response.text();
+      let payload;
+      try {
+        payload = text ? JSON.parse(text) : {};
+      } catch {
+        const error = new Error(`Hardcover returned ${response.status}: ${text.trim()}`);
+        error.retryable = response.status === 429 || response.status >= 500;
+        throw error;
+      }
+      if (!response.ok) {
+        const error = new Error(`Hardcover returned ${response.status}: ${JSON.stringify(payload.errors || payload, null, 2)}`);
+        error.retryable = response.status === 429 || response.status >= 500;
+        throw error;
+      }
+      if (payload.errors) {
+        throw new Error(JSON.stringify(payload.errors, null, 2));
+      }
+      return payload.data;
+    } catch (error) {
+      last = error;
+      if (!error.retryable && !/(fetch failed|no available server)/i.test(error.message)) break;
+    }
   }
-  return payload.data;
+  throw last;
 }
 
 async function verifyToken(token) {
