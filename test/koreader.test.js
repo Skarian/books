@@ -81,6 +81,12 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(patch, /checksum_method"\] = 0/);
   assert.match(patch, /"wifi_enable_action"\] = "turn_on"/);
   assert.doesNotMatch(patch, /wifi_disable_action/);
+  assert.doesNotMatch(patch, /auto_disable_wifi/);
+
+  const koboPatch = zipRead(koboBundle.path, ".adds/koreader/patches/2-books-kosync.lua");
+  assert.match(koboPatch, /"wifi_enable_action"\] = "turn_on"/);
+  assert.match(koboPatch, /"wifi_disable_action"\] = "turn_off"/);
+  assert.match(koboPatch, /"auto_disable_wifi"\] = true/);
   koreader.cleanup(androidBundle);
   koreader.cleanup(koboBundle);
 });

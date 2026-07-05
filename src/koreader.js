@@ -109,6 +109,10 @@ function generate(row, name, options = {}) {
   const network = {
     wifi_enable_action: "turn_on"
   };
+  if (name === "koreader-kobo.zip") {
+    network.wifi_disable_action = "turn_off";
+    network.auto_disable_wifi = true;
+  }
   try {
     fs.mkdirSync(path.join(root, "books"), { recursive: true, mode: 0o700 });
     writeLua(path.join(root, "settings", "opds.lua"), {
