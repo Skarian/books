@@ -45,6 +45,7 @@ test("ISBN imports use Calibre metadata directly and keep operational identifier
   const { system, restore } = load(dir, (command, args) => {
     calls.push({ command, args: args.slice() });
     if (command === "fetch-ebook-metadata") {
+      if (calls.filter((call) => call.command === "fetch-ebook-metadata").length === 1) return { status: 1, stdout: "", stderr: "timeout" };
       fs.writeFileSync(args[args.indexOf("--cover") + 1], "cover");
       return ok("<package><metadata /></package>\n");
     }
@@ -111,6 +112,7 @@ test("import finalization falls back to local metadata when fetch has no result"
   }
 
   assert.ok(calls.some((call) => call.command === "fetch-ebook-metadata"));
+  assert.equal(calls.filter((call) => call.command === "fetch-ebook-metadata").length, 3);
   const local = calls.find((call) => call.command === "ebook-meta" && call.args.includes("--title"));
   assert.ok(local);
   assert.ok(local.args.includes("--authors"));

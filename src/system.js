@@ -205,7 +205,11 @@ function fetchedMetadata(tempDir, options = {}) {
   if (options.isbn) args.push("--isbn", options.isbn);
   if (options.title) args.push("--title", options.title);
   if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
-  const result = run("fetch-ebook-metadata", args, { check: false });
+  let result;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    result = run("fetch-ebook-metadata", args, { check: false });
+    if (result.status === 0 && String(result.stdout || "").trim()) break;
+  }
   if (result.status !== 0 || !String(result.stdout || "").trim()) return {};
   const opf = path.join(tempDir, "metadata.opf");
   fs.writeFileSync(opf, result.stdout, { mode: 0o600 });
