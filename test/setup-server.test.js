@@ -26,6 +26,15 @@ function auth(user, password) {
   return `Basic ${Buffer.from(`${user}:${password}`).toString("base64")}`;
 }
 
+function writeFakeDictionary(config) {
+  const dict = path.join(config.configDir, "english-wiktionary-stardict");
+  fs.mkdirSync(dict, { recursive: true });
+  fs.writeFileSync(path.join(dict, "English-English Wiktionary dictionary.ifo"), "StarDict's dict ifo file\nbookname=English\n");
+  fs.writeFileSync(path.join(dict, "English-English Wiktionary dictionary.idx"), "idx");
+  fs.writeFileSync(path.join(dict, "English-English Wiktionary dictionary.dict.dz"), "dict");
+  fs.writeFileSync(path.join(dict, "English-English Wiktionary dictionary.syn"), "syn");
+}
+
 class MockResponse extends Writable {
   constructor() {
     super();
@@ -69,6 +78,9 @@ test("setup server gates bundle downloads by Books account auth", async () => {
       const simpleUi = path.join(config.configDir, "simpleui.koplugin");
       fs.mkdirSync(simpleUi, { recursive: true });
       fs.writeFileSync(path.join(simpleUi, "main.lua"), "return {}\n");
+    },
+    downloadDictionary: () => {
+      writeFakeDictionary(config);
     }
   };
 

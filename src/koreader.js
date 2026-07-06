@@ -1,4 +1,5 @@
 const fs = require("fs");
+const crypto = require("crypto");
 const os = require("os");
 const path = require("path");
 const config = require("./config");
@@ -8,6 +9,9 @@ const system = require("./system");
 const SIMPLEUI_VERSION = "2.0.1";
 const SIMPLEUI_URL = `https://github.com/doctorhetfield-cmd/simpleui.koplugin/archive/refs/tags/${SIMPLEUI_VERSION}.tar.gz`;
 const SIMPLEUI_DIR = path.join(config.configDir, "simpleui.koplugin");
+const DICTIONARY_URL = "https://raw.githubusercontent.com/Vuizur/Wiktionary-Dictionaries/master/English-English%20Wiktionary%20dictionary%20stardict.tar.gz";
+const DICTIONARY_SHA256 = "2800f630d2975ea29a7b5763e7d79ed71dab9abcc6157534d75c7cd721e8b64b";
+const DICTIONARY_DIR = path.join(config.configDir, "english-wiktionary-stardict");
 const BUNDLES = {
   "koreader-android-kindle.zip": "koreader",
   "koreader-kobo.zip": ".adds/koreader"
@@ -29,6 +33,10 @@ function lua(value, depth = 0) {
 function writeLua(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   fs.writeFileSync(file, `return ${lua(value)}\n`, { mode: 0o600 });
+}
+
+function sha256(file) {
+  return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
 function writeLegacyKosyncPatch(file, settings, network, token) {
@@ -91,6 +99,55 @@ function stageSimpleUi(root, download = downloadSimpleUi) {
   fs.cpSync(SIMPLEUI_DIR, path.join(root, "plugins", "simpleui.koplugin"), { recursive: true });
 }
 
+function dictionaryReady() {
+  if (!fs.existsSync(DICTIONARY_DIR) || !fs.statSync(DICTIONARY_DIR).isDirectory()) return false;
+  const files = fs.readdirSync(DICTIONARY_DIR);
+  return [".ifo", ".idx", ".dict.dz", ".syn"].every((suffix) => files.some((name) => name.endsWith(suffix)));
+}
+
+function relabelDictionary(dir) {
+  const ifo = fs.readdirSync(dir).find((name) => name.endsWith(".ifo"));
+  if (!ifo) throw new Error("Downloaded dictionary archive did not contain an .ifo file.");
+  const file = path.join(dir, ifo);
+  const content = fs.readFileSync(file, "utf8").replace(/^bookname=.*$/m, "bookname=English");
+  if (!/^bookname=English$/m.test(content)) throw new Error("Downloaded dictionary archive did not contain bookname metadata.");
+  fs.writeFileSync(file, content);
+  fs.writeFileSync(path.join(dir, "NOTICE.txt"), [
+    "English dictionary from Vuizur/Wiktionary-Dictionaries.",
+    "Source: https://github.com/Vuizur/Wiktionary-Dictionaries",
+    "Data derived from Wiktionary and licensed under CC BY-SA/GFDL.",
+    ""
+  ].join("\n"));
+}
+
+function downloadDictionary() {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "books-dict-"));
+  const archive = path.join(tempDir, "dictionary.tar.gz");
+  const pending = `${DICTIONARY_DIR}.${process.pid}.tmp`;
+  try {
+    system.run("curl", ["-fsSL", DICTIONARY_URL, "-o", archive]);
+    if (sha256(archive) !== DICTIONARY_SHA256) throw new Error("Downloaded dictionary checksum did not match.");
+    system.run("tar", ["-xzf", archive, "-C", tempDir]);
+    const source = fs.readdirSync(tempDir).map((name) => path.join(tempDir, name)).find((file) => fs.statSync(file).isDirectory());
+    if (!source) throw new Error("Downloaded dictionary archive did not contain a directory.");
+    relabelDictionary(source);
+    fs.rmSync(pending, { recursive: true, force: true });
+    fs.cpSync(source, pending, { recursive: true });
+    fs.rmSync(DICTIONARY_DIR, { recursive: true, force: true });
+    fs.renameSync(pending, DICTIONARY_DIR);
+  } finally {
+    fs.rmSync(pending, { recursive: true, force: true });
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function stageDictionary(root, download = downloadDictionary) {
+  if (!dictionaryReady()) download();
+  const target = path.join(root, "data", "dict", "English");
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  fs.cpSync(DICTIONARY_DIR, target, { recursive: true });
+}
+
 function generate(row, name, options = {}) {
   const rootName = BUNDLES[name];
   if (!rootName) return null;
@@ -120,6 +177,7 @@ function generate(row, name, options = {}) {
     });
     writeLegacyKosyncPatch(path.join(root, "patches", "2-books-kosync.lua"), kosync, network, state.md5(`${row.slug}:${kosync.userkey}:${kosync.custom_server}:books-folder-v2`));
     stageSimpleUi(root, options.downloadSimpleUi);
+    stageDictionary(root, options.downloadDictionary);
     system.run("zip", ["-qr", zipPath, rootName.split("/")[0]], { cwd: tempDir });
     return { path: zipPath, tempDir };
   } catch (error) {

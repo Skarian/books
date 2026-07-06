@@ -34,6 +34,16 @@ function zipRead(file, entry) {
   return result.stdout;
 }
 
+function writeFakeDictionary(config) {
+  const dict = path.join(config.configDir, "english-wiktionary-stardict");
+  fs.mkdirSync(dict, { recursive: true });
+  fs.writeFileSync(path.join(dict, "English-English Wiktionary dictionary.ifo"), "StarDict's dict ifo file\nbookname=English\n");
+  fs.writeFileSync(path.join(dict, "English-English Wiktionary dictionary.idx"), "idx");
+  fs.writeFileSync(path.join(dict, "English-English Wiktionary dictionary.dict.dz"), "dict");
+  fs.writeFileSync(path.join(dict, "English-English Wiktionary dictionary.syn"), "syn");
+  fs.writeFileSync(path.join(dict, "NOTICE.txt"), "notice\n");
+}
+
 test("KOReader starter bundles include account settings and SimpleUI paths", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-koreader-test-"));
   const { config, state, koreader } = load(dir);
@@ -43,6 +53,7 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   const simpleUi = path.join(config.configDir, "simpleui.koplugin");
   fs.mkdirSync(simpleUi, { recursive: true });
   fs.writeFileSync(path.join(simpleUi, "main.lua"), "return {}\n");
+  writeFakeDictionary(config);
 
   const androidBundle = koreader.generate(row, "koreader-android-kindle.zip");
   const koboBundle = koreader.generate(row, "koreader-kobo.zip");
@@ -52,6 +63,11 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.ok(!android.includes("koreader/settings/kosync.lua"));
   assert.ok(android.includes("koreader/patches/2-books-kosync.lua"));
   assert.ok(android.includes("koreader/plugins/simpleui.koplugin/main.lua"));
+  assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.ifo"));
+  assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.idx"));
+  assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.dict.dz"));
+  assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.syn"));
+  assert.ok(android.includes("koreader/data/dict/English/NOTICE.txt"));
 
   const kobo = zipList(koboBundle.path);
   assert.ok(kobo.includes(".adds/koreader/books/"));
@@ -59,10 +75,12 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.ok(!kobo.includes(".adds/koreader/settings/kosync.lua"));
   assert.ok(kobo.includes(".adds/koreader/patches/2-books-kosync.lua"));
   assert.ok(kobo.includes(".adds/koreader/plugins/simpleui.koplugin/main.lua"));
+  assert.ok(kobo.includes(".adds/koreader/data/dict/English/English-English Wiktionary dictionary.ifo"));
 
   const opds = zipRead(androidBundle.path, "koreader/settings/opds.lua");
   assert.match(opds, /https:\/\/books\.test\/catalog/);
   assert.match(opds, /alpha-bravo-charlie-delta-echo-foxtrot/);
+  assert.match(zipRead(androidBundle.path, "koreader/data/dict/English/English-English Wiktionary dictionary.ifo"), /bookname=English/);
 
   const patch = zipRead(androidBundle.path, "koreader/patches/2-books-kosync.lua");
   assert.match(patch, /DataStorage:getDataDir/);
@@ -91,7 +109,7 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   koreader.cleanup(koboBundle);
 });
 
-test("starter bundles download SimpleUI when the cached plugin source is missing", () => {
+test("starter bundles download cached assets when missing", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-koreader-test-"));
   const { config, state, koreader } = load(dir);
   state.createAccount({ name: "Alice", slug: "alice" });
@@ -103,8 +121,12 @@ test("starter bundles download SimpleUI when the cached plugin source is missing
       const simpleUi = path.join(config.configDir, "simpleui.koplugin");
       fs.mkdirSync(simpleUi, { recursive: true });
       fs.writeFileSync(path.join(simpleUi, "main.lua"), "return {}\n");
+    },
+    downloadDictionary: () => {
+      writeFakeDictionary(config);
     }
   });
   assert.ok(zipList(bundle.path).includes("koreader/plugins/simpleui.koplugin/main.lua"));
+  assert.ok(zipList(bundle.path).includes("koreader/data/dict/English/English-English Wiktionary dictionary.ifo"));
   koreader.cleanup(bundle);
 });
