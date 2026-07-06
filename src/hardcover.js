@@ -99,6 +99,14 @@ function authors(book) {
   return names.join(", ");
 }
 
+function primaryAuthor(book) {
+  for (const contribution of book.contributions || []) {
+    const name = contribution.author && contribution.author.name;
+    if (name) return name;
+  }
+  return "";
+}
+
 function safeFilename(value) {
   return (String(value).replace(/[^A-Za-z0-9._ -]+/g, "").replace(/\s+/g, " ").trim().slice(0, 120) || "book") + ".epub";
 }
@@ -168,8 +176,7 @@ function titleIdentityScore(candidateTitle, title, author) {
 }
 
 function isEligibleCandidate(item, title, author) {
-  if (!item.hash || String(item.format || "").trim().toLowerCase() !== "epub") return false;
-  if (!["english", "eng", "en"].includes(String(item.language || "").trim().toLowerCase())) return false;
+  if (!isDownloadableCandidate(item)) return false;
   if (hasAsciiLeadingTitle(title) && !hasAsciiLeadingTitle(item.title)) return false;
   if (titleIdentityScore(item.title, title, author) < 60) return false;
 
@@ -178,6 +185,12 @@ function isEligibleCandidate(item, title, author) {
     const candidateAuthorTokens = tokenSet(item.authors);
     if (!surnames.length || !surnames.some((token) => candidateAuthorTokens.has(token))) return false;
   }
+  return true;
+}
+
+function isDownloadableCandidate(item) {
+  if (!item.hash || String(item.format || "").trim().toLowerCase() !== "epub") return false;
+  if (!["english", "eng", "en"].includes(String(item.language || "").trim().toLowerCase())) return false;
   return true;
 }
 
@@ -221,9 +234,23 @@ function compareCandidates(a, b) {
   return 0;
 }
 
-async function selectCandidate(items, title, author) {
-  const candidates = items.map((item, index) => ({ ...item, _annaRank: index }))
-    .filter((item) => isEligibleCandidate(item, title, author));
+function isIsbn13(value) {
+  return /^\d{13}$/.test(String(value || ""));
+}
+
+function dedupeCandidates(candidates) {
+  const byHash = new Map();
+  for (const item of candidates) {
+    const existing = byHash.get(item.hash);
+    if (!existing || item._annaRank < existing._annaRank
+      || (item._annaRank === existing._annaRank && isIsbn13(item._isbn) && !isIsbn13(existing._isbn))) byHash.set(item.hash, item);
+  }
+  return Array.from(byHash.values());
+}
+
+async function selectCandidate(items, title, author, options = {}) {
+  const candidates = dedupeCandidates(items.map((item, index) => ({ ...item, _annaRank: item._annaRank ?? index }))
+    .filter((item) => options.identity === false ? isDownloadableCandidate(item) : isEligibleCandidate(item, title, author)));
   const cache = new Map();
   await Promise.all(candidates.map(async (item) => {
     item._annaStats = await fetchAnnaStats(item.hash, cache);
@@ -233,11 +260,23 @@ async function selectCandidate(items, title, author) {
   return candidates[0];
 }
 
-async function findCandidate(title, author) {
-  const query = `${title} ${author} epub english`.trim();
+function editionIsbns(edition = {}) {
+  return Array.from(new Set([edition.isbn_10, edition.isbn_13].flatMap((isbn) => isbnValues({ isbn }))));
+}
+
+function searchCandidates(query, title, author, options = {}) {
   const result = system.annas(["book-search", query], { check: false });
   if (result.status !== 0) throw new Error(result.stderr || result.stdout || `Anna search failed for ${title}`);
-  return selectCandidate(parseAnnaBlocks(result.stdout), title, author);
+  return parseAnnaBlocks(result.stdout).map((item, index) => ({ ...item, _annaRank: index, _isbn: options.isbn }));
+}
+
+async function findCandidate(title, author, edition = {}) {
+  const isbnCandidates = editionIsbns(edition)
+    .flatMap((isbn) => searchCandidates(isbn, title, author, { isbn }))
+    .filter(isDownloadableCandidate);
+  if (isbnCandidates.length) return selectCandidate(isbnCandidates, title, author, { identity: false });
+  const query = `${title} ${author} epub english`.trim();
+  return selectCandidate(searchCandidates(query, title, author), title, author);
 }
 
 function downloadCandidate(candidate, filename) {
@@ -269,7 +308,7 @@ function isbnValues(identifiers = {}) {
 }
 
 function editionIsbn(edition = {}) {
-  return isbnValues({ isbn: [edition.isbn_13, edition.isbn_10].filter(Boolean).join(",") })[0] || null;
+  return editionIsbns(edition)[0] || null;
 }
 
 function progressPages(percentage, pages) {
@@ -465,7 +504,7 @@ async function fulfillRequest(row, userBook, title, author, candidate) {
   const [book] = system.importFiles([downloadPath], {
     users: [row.slug],
     annaMd5: candidate.hash,
-    isbn: editionIsbn(userBook.edition),
+    isbn: candidate._isbn,
     title,
     authors: author ? [author] : []
   });
@@ -482,11 +521,11 @@ async function syncUser(row, options = {}) {
     if (options.limit && processedCount >= options.limit) break;
     const book = userBook.book || {};
     const title = (book.title || "").trim();
-    const author = authors(book);
+    const author = primaryAuthor(book);
     if (!title) continue;
     try {
       console.log(`${row.slug}: searching ${title}${author ? ` by ${author}` : ""}`);
-      const candidate = await findCandidate(title, author);
+      const candidate = await findCandidate(title, author, userBook.edition);
       if (options.dryRun) {
         console.log(`dry-run candidate: ${candidate.hash} ${candidate.format} ${candidate.language} ${candidate.title}`);
         processedCount += 1;

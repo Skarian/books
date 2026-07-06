@@ -11,6 +11,7 @@ const SIMPLEUI_URL = `https://github.com/doctorhetfield-cmd/simpleui.koplugin/ar
 const SIMPLEUI_DIR = path.join(config.configDir, "simpleui.koplugin");
 const DICTIONARY_URL = "https://raw.githubusercontent.com/Vuizur/Wiktionary-Dictionaries/master/English-English%20Wiktionary%20dictionary%20stardict.tar.gz";
 const DICTIONARY_SHA256 = "2800f630d2975ea29a7b5763e7d79ed71dab9abcc6157534d75c7cd721e8b64b";
+// TODO: Add Google search as a dictionary lookup option.
 const DICTIONARY_DIR = path.join(config.configDir, "english-wiktionary-stardict");
 const BUNDLES = {
   "koreader-android-kindle.zip": "koreader",

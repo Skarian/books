@@ -57,7 +57,7 @@ test("KOReader document hash uses the binary partial MD5 sampling", () => {
 test("progress conversion uses one percent or one page threshold", () => {
   const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
   assert.deepEqual(hardcover._test.isbnValues({ isbn: "978-0-061789-08-3, 1260027090" }), ["9780061789083", "1260027090"]);
-  assert.equal(hardcover._test.editionIsbn({ isbn_13: "978-0-062010-61-2", isbn_10: "0062010619" }), "9780062010612");
+  assert.equal(hardcover._test.editionIsbn({ isbn_13: "978-0-062010-61-2", isbn_10: "0062010619" }), "0062010619");
   assert.equal(hardcover._test.progressPages(0.023, 288), 6);
   assert.equal(hardcover._test.progressPages(0.003, 500), 1);
   assert.equal(hardcover._test.progressPages(0.003, 100), null);
@@ -149,6 +149,74 @@ test("Anna candidate ranking caches duplicate MD5 stats", async () => {
   assert.equal(fetches, 1);
 });
 
+test("Hardcover fulfillment prefers exact ISBN Anna branches before title search", async () => {
+  const { hardcover, system } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const original = { ...system };
+  const queries = [];
+  Object.assign(system, {
+    annas: (args) => {
+      queries.push(args[1]);
+      if (args[1] === "0441172717") return { status: 0, stderr: "", stdout: [
+        "Book 1:",
+        "Title: Dune",
+        "Authors: Frank Herbert",
+        "Language: English",
+        "Format: EPUB",
+        "Hash: right"
+      ].join("\n") };
+      if (args[1] === "9783423026185") return { status: 0, stderr: "", stdout: "" };
+      throw new Error("title fallback should not run");
+    }
+  });
+  try {
+    const candidate = await withFetch(annaStats({ right: { downloads_total: 10 } }), () =>
+      hardcover._test.findCandidate("Dune", "Frank Herbert", { isbn_10: "0441172717", isbn_13: "9783423026185" }));
+    assert.equal(candidate.hash, "right");
+    assert.equal(candidate._isbn, "0441172717");
+    assert.deepEqual(queries, ["0441172717", "9783423026185"]);
+  } finally {
+    Object.assign(system, original);
+  }
+});
+
+test("Hardcover fulfillment falls back to title search when ISBN branches have no EPUB", async () => {
+  const { hardcover, system } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const original = { ...system };
+  const queries = [];
+  Object.assign(system, {
+    annas: (args) => {
+      queries.push(args[1]);
+      if (args[1] === "0441172717") return { status: 0, stderr: "", stdout: [
+        "Book 1:",
+        "Title: Dune",
+        "Authors: Frank Herbert",
+        "Language: English",
+        "Format: PDF",
+        "Hash: pdf"
+      ].join("\n") };
+      if (args[1] === "9783423026185") return { status: 0, stderr: "", stdout: "" };
+      if (args[1] === "Dune Frank Herbert epub english") return { status: 0, stderr: "", stdout: [
+        "Book 1:",
+        "Title: Dune",
+        "Authors: Frank Herbert",
+        "Language: English",
+        "Format: EPUB",
+        "Hash: fallback"
+      ].join("\n") };
+      throw new Error(`unexpected query: ${args[1]}`);
+    }
+  });
+  try {
+    const candidate = await withFetch(annaStats({ fallback: { downloads_total: 10 } }), () =>
+      hardcover._test.findCandidate("Dune", "Frank Herbert", { isbn_10: "0441172717", isbn_13: "9783423026185" }));
+    assert.equal(candidate.hash, "fallback");
+    assert.equal(candidate._isbn, undefined);
+    assert.deepEqual(queries, ["0441172717", "9783423026185", "Dune Frank Herbert epub english"]);
+  } finally {
+    Object.assign(system, original);
+  }
+});
+
 test("Hardcover fulfillment reuses exact stored Hardcover ids only", async () => {
   const { hardcover, system } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
   const original = { ...system };
@@ -196,7 +264,7 @@ test("Hardcover fulfillment downloads new books with title filenames", async () 
         id: 7,
         book_id: 42,
         edition: { isbn_13: "9780062010612" }
-      }, "Power", "Jeffrey Pfeffer", { hash: "abc" }));
+      }, "Power", "Jeffrey Pfeffer", { hash: "abc", _isbn: "9780062010612" }));
     assert.equal(path.basename(importedPath), "Power.epub");
     assert.equal(importOptions.isbn, "9780062010612");
   } finally {
