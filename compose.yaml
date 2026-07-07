@@ -94,6 +94,7 @@ services:
     command: ["node", "src/setup-server.js"]
     volumes:
       - ${BOOKS_HOST_DATA_DIR:-./data}:/srv/books
+      - ${BOOKS_HOST_CODEX_HOME:-./data/config/codex-disabled}:/codex-home
     expose:
       - "3000"
     restart: unless-stopped

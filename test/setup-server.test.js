@@ -2,19 +2,23 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { Readable } = require("node:stream");
 const { Writable } = require("node:stream");
 const test = require("node:test");
 
 function resetModules() {
-  for (const mod of ["../src/setup-server", "../src/crosspoint", "../src/koreader", "../src/readest", "../src/system", "../src/state", "../src/config"]) {
+  for (const mod of ["../src/setup-server", "../src/crosspoint", "../src/koreader", "../src/readest", "../src/system", "../src/state", "../src/config", "../src/ai"]) {
     delete require.cache[require.resolve(mod)];
   }
 }
 
-function load(dir) {
+function load(dir, env = {}) {
   resetModules();
   process.env.BOOKS_DATA_DIR = dir;
   process.env.BOOKS_PUBLIC_HOST = "books.test";
+  delete process.env.BOOKS_AI_PROVIDER;
+  delete process.env.BOOKS_AI_MODEL;
+  Object.assign(process.env, env);
   return {
     config: require("../src/config"),
     state: require("../src/state"),
@@ -59,9 +63,13 @@ class MockResponse extends Writable {
   }
 }
 
-async function request(setup, url, authorization, options) {
+async function request(setup, url, authorization, options, body) {
+  const req = body ? Readable.from([Buffer.from(JSON.stringify(body))]) : {};
+  req.method = body ? "POST" : "GET";
+  req.url = url;
+  req.headers = { authorization };
   const res = new MockResponse();
-  setup.serve({ method: "GET", url, headers: { authorization } }, res, options);
+  setup.serve(req, res, options || {});
   await new Promise((resolve) => res.on("finish", resolve));
   return res;
 }
@@ -130,4 +138,37 @@ test("setup server gates bundle downloads by Books account auth", async () => {
 
   response = await request(setup, "/setup/../koreader-kobo.zip", auth("alice", "alice-password"), options);
   assert.equal(response.statusCode, 404);
+});
+
+test("AI dictionary endpoint is opt-in and Books-auth gated", async () => {
+  let dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-setup-test-"));
+  let loaded = load(dir);
+  let response = await request(loaded.setup, "/ai-dictionary/lookup", null, null, { selection: "gom jabbar" });
+  assert.equal(response.statusCode, 404);
+
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-setup-test-"));
+  loaded = load(dir, { BOOKS_AI_PROVIDER: "codex" });
+  const { state, setup } = loaded;
+  state.createAccount({ name: "Alice", slug: "alice" });
+  state.updateAccount("alice", { books_password: "alice-password" });
+  let seen;
+  response = await request(setup, "/ai-dictionary/lookup", auth("alice", "alice-password"), {
+    aiLookup: async (input) => {
+      seen = input;
+      return { label: "object", definitions: ["A poisoned needle used as a test."] };
+    }
+  }, {
+    book: "Dune by Frank Herbert",
+    chapter: "chapter 1",
+    progress: "about 4% through the book",
+    selection: "gom jabbar",
+    passage: "test {{{ gom jabbar }}} passage"
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.text()), { label: "object", definitions: ["A poisoned needle used as a test."] });
+  assert.equal(seen.book, "Dune by Frank Herbert");
+  assert.equal(seen.selection, "gom jabbar");
+
+  response = await request(setup, "/ai-dictionary/lookup", auth("alice", "wrong"), null, { selection: "gom jabbar" });
+  assert.equal(response.statusCode, 401);
 });

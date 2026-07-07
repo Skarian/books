@@ -2,6 +2,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
 const path = require("path");
+const ai = require("./ai");
 const config = require("./config");
 const state = require("./state");
 const system = require("./system");
@@ -13,6 +14,7 @@ const DICTIONARY_URL = "https://raw.githubusercontent.com/Vuizur/Wiktionary-Dict
 const DICTIONARY_SHA256 = "2800f630d2975ea29a7b5763e7d79ed71dab9abcc6157534d75c7cd721e8b64b";
 // TODO: Add Google search as a dictionary lookup option.
 const DICTIONARY_DIR = path.join(config.configDir, "english-wiktionary-stardict");
+const AI_DICTIONARY_DIR = path.join(__dirname, "..", "assets", "books-ai-dictionary.koplugin");
 const BUNDLES = {
   "koreader-android-kindle.zip": "koreader",
   "koreader-kobo.zip": ".adds/koreader"
@@ -149,6 +151,11 @@ function stageDictionary(root, download = downloadDictionary) {
   fs.cpSync(DICTIONARY_DIR, target, { recursive: true });
 }
 
+function stageAiDictionary(root) {
+  fs.mkdirSync(path.join(root, "plugins"), { recursive: true, mode: 0o700 });
+  fs.cpSync(AI_DICTIONARY_DIR, path.join(root, "plugins", "books-ai-dictionary.koplugin"), { recursive: true });
+}
+
 function generate(row, name, options = {}) {
   const rootName = BUNDLES[name];
   if (!rootName) return null;
@@ -180,6 +187,7 @@ function generate(row, name, options = {}) {
     writeLegacyKosyncPatch(path.join(root, "patches", "2-books-kosync.lua"), kosync, network, state.md5(`${row.slug}:${kosync.userkey}:${kosync.custom_server}:books-folder-v2`));
     stageSimpleUi(root, options.downloadSimpleUi);
     stageDictionary(root, options.downloadDictionary);
+    if (ai.enabled()) stageAiDictionary(root);
     system.run("zip", ["-qr", zipPath, rootName.split("/")[0]], { cwd: tempDir });
     return { path: zipPath, tempDir };
   } catch (error) {

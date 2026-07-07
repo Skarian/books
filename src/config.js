@@ -35,5 +35,9 @@ module.exports = {
   annasBaseUrl: value("ANNAS_BASE_URL", "annas-archive.gl"),
   annasDownloadPath: downloadDir,
   hardcoverDailyDownloadCap: Number(value("HARDCOVER_DAILY_DOWNLOAD_CAP", "10")),
+  aiProvider: value("BOOKS_AI_PROVIDER", ""),
+  aiModel: value("BOOKS_AI_MODEL", "gpt-5.4-mini"),
+  codexHome: value("BOOKS_CODEX_HOME", "/codex-home"),
+  openaiApiKey: value("OPENAI_API_KEY", ""),
   defaultLanguage: "eng"
 };

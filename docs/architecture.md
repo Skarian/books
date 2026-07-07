@@ -44,6 +44,7 @@ https://books.example.com
   /readest              → Books setup service page
   /crosspoint           → Books setup service page
   /setup/<zip>          → Books setup service ZIP downloads
+  /ai-dictionary/lookup → Optional AI dictionary lookup proxy
   /library              → 302 redirect to https://web.readest.com/
   /healthz              → nginx returns "ok" directly, no upstream
   /kosync/users/create  → 404 (registration disabled; accounts are managed by the CLI)
@@ -58,6 +59,8 @@ nginx uses Docker's internal DNS resolver (`127.0.0.11`) with `valid=30s` so it 
 **KOSync (`/kosync/...`):** KOSync's own credential scheme. Clients send `x-auth-user` (username) and `x-auth-key` (MD5 hash of the password) as request headers. KOSync stores passwords as MD5 hashes in Redis.
 
 **Reader setup (`/koreader`, `/readest`, `/crosspoint`, `/setup/...`):** HTTP Basic auth against `state.json`. Setup pages and ZIP downloads use the authenticated user, and only known setup ZIP filenames are served.
+
+**AI dictionary (`/ai-dictionary/lookup`):** Disabled unless `BOOKS_AI_PROVIDER` is set to `codex` or `openai`. Requests use the existing Books account Basic auth; provider credentials stay on the server.
 
 Each user gets one Books login — username and diceware passphrase — that works for both systems. The `reconcile` command writes that login into Calibre and KOSync whenever an account is created, restored, or pushed.
 

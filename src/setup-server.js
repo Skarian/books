@@ -4,6 +4,7 @@ const crosspoint = require("./crosspoint");
 const koreader = require("./koreader");
 const readest = require("./readest");
 const state = require("./state");
+const ai = require("./ai");
 
 function unauthorized(res) {
   res.writeHead(401, {
@@ -54,6 +55,38 @@ function isPage(req, paths) {
   }
 }
 
+async function readJson(req) {
+  let body = "";
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 8192) throw new Error("request too large");
+    body += chunk;
+  }
+  return JSON.parse(body || "{}");
+}
+
+async function aiLookup(req, res, options) {
+  if (!ai.enabled()) {
+    res.writeHead(404, { "Cache-Control": "private, no-store" });
+    res.end("not found\n");
+    return;
+  }
+  if (!authenticatedAccount(req)) return unauthorized(res);
+  try {
+    const entry = await (options.aiLookup || ai.lookup)(await readJson(req));
+    res.writeHead(200, {
+      "Cache-Control": "private, no-store",
+      "Content-Type": "application/json; charset=utf-8"
+    });
+    res.end(`${JSON.stringify(entry)}\n`);
+  } catch (error) {
+    const status = error instanceof SyntaxError || error.message === "request too large" ? 400 : 503;
+    res.writeHead(status, { "Cache-Control": "private, no-store" });
+    res.end(status === 400 ? "bad request\n" : "lookup failed\n");
+  }
+}
+
 function page(title, body) {
   return `<!doctype html>
 <html>
@@ -99,6 +132,10 @@ function crosspointPage() {
 }
 
 function serve(req, res, options = {}) {
+  if (req.method === "POST" && isPage(req, ["/ai-dictionary/lookup"])) {
+    aiLookup(req, res, options);
+    return;
+  }
   if (req.method !== "GET") {
     res.writeHead(404, { "Cache-Control": "private, no-store" });
     res.end("not found\n");

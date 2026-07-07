@@ -136,6 +136,10 @@ docker compose run --rm admin hardcover clear-token alice
 
 The same worker pass also pushes reading progress from KOSync back to Hardcover. For books fulfilled from Hardcover, progress is matched by the stored `hardcover` identifier. Manual imports can still match an existing Hardcover row by exact title/author, or create a row from an exact ISBN lookup. Progress only moves forward; the worker does not pull Hardcover progress into KOSync.
 
+## Optional AI dictionary
+
+AI dictionary lookup is disabled unless `BOOKS_AI_PROVIDER` is set to `codex` or `openai`. `codex` mode uses a logged-in Codex home mounted with `BOOKS_HOST_CODEX_HOME`. `openai` mode uses `OPENAI_API_KEY`. Requests use the same Books login as OPDS/setup.
+
 Items with no match, a download error, or an import error are logged and stay on Want to Read. The worker retries on the next five-minute cycle.
 
 The download cap (`HARDCOVER_DAILY_DOWNLOAD_CAP` in `.env`, default 10) applies across all users and resets at UTC midnight.

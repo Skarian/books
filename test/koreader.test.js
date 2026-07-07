@@ -6,15 +6,17 @@ const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 
 function resetModules() {
-  for (const mod of ["../src/koreader", "../src/system", "../src/state", "../src/config"]) {
+  for (const mod of ["../src/koreader", "../src/ai", "../src/system", "../src/state", "../src/config"]) {
     delete require.cache[require.resolve(mod)];
   }
 }
 
-function load(dir) {
+function load(dir, env = {}) {
   resetModules();
   process.env.BOOKS_DATA_DIR = dir;
   process.env.BOOKS_PUBLIC_HOST = "books.test";
+  delete process.env.BOOKS_AI_PROVIDER;
+  Object.assign(process.env, env);
   return {
     config: require("../src/config"),
     state: require("../src/state"),
@@ -68,6 +70,7 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.dict.dz"));
   assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.syn"));
   assert.ok(android.includes("koreader/data/dict/English/NOTICE.txt"));
+  assert.ok(!android.some((entry) => entry.includes("/plugins/books-ai-dictionary.koplugin/")));
 
   const kobo = zipList(koboBundle.path);
   assert.ok(kobo.includes(".adds/koreader/books/"));
@@ -76,6 +79,7 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.ok(kobo.includes(".adds/koreader/patches/2-books-kosync.lua"));
   assert.ok(kobo.includes(".adds/koreader/plugins/simpleui.koplugin/main.lua"));
   assert.ok(kobo.includes(".adds/koreader/data/dict/English/English-English Wiktionary dictionary.ifo"));
+  assert.ok(!kobo.some((entry) => entry.includes("/plugins/books-ai-dictionary.koplugin/")));
 
   const opds = zipRead(androidBundle.path, "koreader/settings/opds.lua");
   assert.match(opds, /https:\/\/books\.test\/catalog/);
@@ -131,4 +135,49 @@ test("starter bundles download cached assets when missing", () => {
   assert.ok(zipList(bundle.path).includes("koreader/plugins/simpleui.koplugin/main.lua"));
   assert.ok(zipList(bundle.path).includes("koreader/data/dict/English/English-English Wiktionary dictionary.ifo"));
   koreader.cleanup(bundle);
+});
+
+test("KOReader starter bundles include AI dictionary plugin only when AI is enabled", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-koreader-test-"));
+  const { config, state, koreader } = load(dir, { BOOKS_AI_PROVIDER: "codex" });
+  state.createAccount({ name: "Alice", slug: "alice" });
+  state.updateAccount("alice", { books_password: "alpha-bravo-charlie-delta-echo-foxtrot" });
+  const row = state.getAccount("alice");
+  const simpleUi = path.join(config.configDir, "simpleui.koplugin");
+  fs.mkdirSync(simpleUi, { recursive: true });
+  fs.writeFileSync(path.join(simpleUi, "main.lua"), "return {}\n");
+  writeFakeDictionary(config);
+
+  const androidBundle = koreader.generate(row, "koreader-android-kindle.zip");
+  const koboBundle = koreader.generate(row, "koreader-kobo.zip");
+  assert.ok(zipList(androidBundle.path).includes("koreader/plugins/books-ai-dictionary.koplugin/main.lua"));
+  assert.ok(zipList(androidBundle.path).includes("koreader/plugins/books-ai-dictionary.koplugin/_meta.lua"));
+  assert.ok(zipList(koboBundle.path).includes(".adds/koreader/plugins/books-ai-dictionary.koplugin/main.lua"));
+
+  const plugin = zipRead(androidBundle.path, "koreader/plugins/books-ai-dictionary.koplugin/main.lua");
+  assert.match(plugin, /AI Dictionary/);
+  assert.match(plugin, /\/ai-dictionary\/lookup/);
+  assert.match(plugin, /getSelectedWordContext\(40\)/);
+  assert.match(plugin, /NetworkMgr:willRerunWhenOnline/);
+  assert.match(plugin, /Trapper:wrap/);
+  assert.match(plugin, /dismissableRunInSubprocess/);
+  assert.match(plugin, /UIManager:forceRePaint/);
+  assert.match(plugin, /container\/inputcontainer/);
+  assert.match(plugin, /onDictButtonsReady/);
+  assert.match(plugin, /dict_popup\.results\[1\]\.dict == _\("AI Dictionary"\)/);
+  assert.match(plugin, /table\.insert\(buttons, 2/);
+  assert.match(plugin, /showDict/);
+  assert.match(plugin, /is_html = true/);
+  assert.match(plugin, /type\(result\.label\) == "string"/);
+  assert.match(plugin, /type\(result\.definitions\) == "table"/);
+  assert.match(plugin, /<i>/);
+  assert.doesNotMatch(plugin, /_books_ai_dictionary_handleEvent/);
+  assert.doesNotMatch(plugin, /UIManager:scheduleIn\(0\.1, function\(\)\s*local answer/);
+  for (const field of ["book", "chapter", "progress", "selection", "passage"]) {
+    assert.match(plugin, new RegExp(`${field} =`));
+  }
+  assert.doesNotMatch(plugin, /alpha-bravo-charlie-delta-echo-foxtrot/);
+
+  koreader.cleanup(androidBundle);
+  koreader.cleanup(koboBundle);
 });
