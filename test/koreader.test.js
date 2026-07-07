@@ -159,6 +159,7 @@ test("KOReader starter bundles include AI dictionary plugin only when AI is enab
   assert.match(plugin, /\/ai-dictionary\/lookup/);
   assert.match(plugin, /getSelectedWordContext\(40\)/);
   assert.match(plugin, /NetworkMgr:willRerunWhenOnline/);
+  assert.match(plugin, /socketutil:set_timeout\(15, 60\)/);
   assert.match(plugin, /Trapper:wrap/);
   assert.match(plugin, /dismissableRunInSubprocess/);
   assert.match(plugin, /UIManager:forceRePaint/);

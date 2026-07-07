@@ -52,7 +52,7 @@ local function request(endpoint, username, password, body)
     local socket = require("socket")
     local socketutil = require("socketutil")
     local sink = {}
-    socketutil:set_timeout()
+    socketutil:set_timeout(15, 60)
     local code, _, status = socket.skip(1, http.request{
         url = endpoint,
         method = "POST",
