@@ -96,6 +96,8 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(patch, /quickstart%-\.\*%\.html/);
   assert.match(patch, /G_reader_settings:readSetting\("kosync"\)/);
   assert.match(patch, /G_reader_settings:saveSetting\("kosync", kosync\)/);
+  assert.match(patch, /reader_defaults/);
+  assert.match(patch, /"copt_font_size"\] = 30/);
   assert.match(patch, /https:\/\/books\.test\/kosync/);
   assert.match(patch, /auto_sync"\] = true/);
   assert.match(patch, /sync_forward"\] = 2/);
@@ -107,6 +109,7 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.doesNotMatch(patch, /auto_restore_wifi/);
 
   const koboPatch = zipRead(koboBundle.path, ".adds/koreader/patches/2-books-kosync.lua");
+  assert.match(koboPatch, /"copt_font_size"\] = 30/);
   assert.match(koboPatch, /"wifi_enable_action"\] = "turn_on"/);
   assert.match(koboPatch, /"wifi_disable_action"\] = "turn_off"/);
   assert.match(koboPatch, /"auto_disable_wifi"\] = true/);

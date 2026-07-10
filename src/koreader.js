@@ -43,11 +43,13 @@ function sha256(file) {
 }
 
 function writeLegacyKosyncPatch(file, settings, network, token) {
+  const readerDefaults = { copt_font_size: 30 };
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   fs.writeFileSync(file, [
     `local token = ${lua(token)}`,
     `local desired = ${lua(settings)}`,
     `local network = ${lua(network)}`,
+    `local reader_defaults = ${lua(readerDefaults)}`,
     'local DataStorage = require("datastorage")',
     'local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")',
     'local books_dir = (DataStorage:getDataDir() or "."):gsub("/+$", "") .. "/books"',
@@ -68,6 +70,12 @@ function writeLegacyKosyncPatch(file, settings, network, token) {
     "  changed = true",
     "end",
     "for key, value in pairs(network) do",
+    "  if G_reader_settings:readSetting(key) == nil then",
+    "    G_reader_settings:saveSetting(key, value)",
+    "    changed = true",
+    "  end",
+    "end",
+    "for key, value in pairs(reader_defaults) do",
     "  if G_reader_settings:readSetting(key) == nil then",
     "    G_reader_settings:saveSetting(key, value)",
     "    changed = true",
