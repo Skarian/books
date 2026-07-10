@@ -112,7 +112,7 @@ async function request(url, headers, input) {
       text: { verbosity: "low" },
       reasoning: { effort: "low" }
     }),
-    signal: AbortSignal.timeout(45_000)
+    signal: AbortSignal.timeout(60_000)
   });
   if (!response.ok) throw new Error(`AI provider request failed: ${response.status}`);
   const answer = await collectSse(response);

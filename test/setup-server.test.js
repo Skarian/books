@@ -171,4 +171,5 @@ test("AI dictionary endpoint is opt-in and Books-auth gated", async () => {
 
   response = await request(setup, "/ai-dictionary/lookup", auth("alice", "wrong"), null, { selection: "gom jabbar" });
   assert.equal(response.statusCode, 401);
+  assert.match(fs.readFileSync(path.join(__dirname, "..", "src", "ai.js"), "utf8"), /AbortSignal\.timeout\(60_000\)/);
 });
