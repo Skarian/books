@@ -7,14 +7,15 @@ const config = require("./config");
 const state = require("./state");
 const system = require("./system");
 
-const SIMPLEUI_VERSION = "2.0.1";
+const SIMPLEUI_VERSION = "2.1";
 const SIMPLEUI_URL = `https://github.com/doctorhetfield-cmd/simpleui.koplugin/archive/refs/tags/${SIMPLEUI_VERSION}.tar.gz`;
-const SIMPLEUI_DIR = path.join(config.configDir, "simpleui.koplugin");
+const SIMPLEUI_DIR = path.join(config.configDir, `simpleui-${SIMPLEUI_VERSION}.koplugin`);
 const DICTIONARY_URL = "https://raw.githubusercontent.com/Vuizur/Wiktionary-Dictionaries/master/English-English%20Wiktionary%20dictionary%20stardict.tar.gz";
 const DICTIONARY_SHA256 = "2800f630d2975ea29a7b5763e7d79ed71dab9abcc6157534d75c7cd721e8b64b";
 // TODO: Add Google search as a dictionary lookup option.
 const DICTIONARY_DIR = path.join(config.configDir, "english-wiktionary-stardict");
 const AI_DICTIONARY_DIR = path.join(__dirname, "..", "assets", "books-ai-dictionary.koplugin");
+const BOOKS_PLUGIN_DIR = path.join(__dirname, "..", "assets", "books.koplugin");
 const BUNDLES = {
   "koreader-android-kindle.zip": "koreader",
   "koreader-kobo.zip": ".adds/koreader"
@@ -164,6 +165,18 @@ function stageAiDictionary(root) {
   fs.cpSync(AI_DICTIONARY_DIR, path.join(root, "plugins", "books-ai-dictionary.koplugin"), { recursive: true });
 }
 
+function stageBooksPlugin(root, row) {
+  const target = path.join(root, "plugins", "books.koplugin");
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  fs.cpSync(BOOKS_PLUGIN_DIR, target, { recursive: true });
+  writeLua(path.join(target, "config.lua"), {
+    browse_url: `https://${config.publicHost}/catalog`,
+    updates_url: `https://${config.publicHost}/catalog/navcatalog/4f6e6577657374?library_id=library`,
+    username: row.slug,
+    password: row.books_password
+  });
+}
+
 function generate(row, name, options = {}) {
   const rootName = BUNDLES[name];
   if (!rootName) return null;
@@ -189,11 +202,9 @@ function generate(row, name, options = {}) {
   }
   try {
     fs.mkdirSync(path.join(root, "books"), { recursive: true, mode: 0o700 });
-    writeLua(path.join(root, "settings", "opds.lua"), {
-      servers: [{ title: "Books", url: `https://${config.publicHost}/catalog`, username: row.slug, password: row.books_password }]
-    });
     writeLegacyKosyncPatch(path.join(root, "patches", "2-books-kosync.lua"), kosync, network, state.md5(`${row.slug}:${kosync.userkey}:${kosync.custom_server}:books-folder-v2`));
     stageSimpleUi(root, options.downloadSimpleUi);
+    stageBooksPlugin(root, row);
     stageDictionary(root, options.downloadDictionary);
     if (ai.enabled()) stageAiDictionary(root);
     system.run("zip", ["-qr", zipPath, rootName.split("/")[0]], { cwd: tempDir });

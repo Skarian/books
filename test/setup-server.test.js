@@ -83,7 +83,7 @@ test("setup server gates bundle downloads by Books account auth", async () => {
   state.updateAccount("bob", { books_password: "bob-password" });
   const options = {
     downloadSimpleUi: () => {
-      const simpleUi = path.join(config.configDir, "simpleui.koplugin");
+      const simpleUi = path.join(config.configDir, "simpleui-2.1.koplugin");
       fs.mkdirSync(simpleUi, { recursive: true });
       fs.writeFileSync(path.join(simpleUi, "main.lua"), "return {}\n");
     },

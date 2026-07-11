@@ -52,7 +52,7 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   state.createAccount({ name: "Alice", slug: "alice" });
   state.updateAccount("alice", { books_password: "alpha-bravo-charlie-delta-echo-foxtrot" });
   const row = state.getAccount("alice");
-  const simpleUi = path.join(config.configDir, "simpleui.koplugin");
+  const simpleUi = path.join(config.configDir, "simpleui-2.1.koplugin");
   fs.mkdirSync(simpleUi, { recursive: true });
   fs.writeFileSync(path.join(simpleUi, "main.lua"), "return {}\n");
   writeFakeDictionary(config);
@@ -61,10 +61,13 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   const koboBundle = koreader.generate(row, "koreader-kobo.zip");
   const android = zipList(androidBundle.path);
   assert.ok(android.includes("koreader/books/"));
-  assert.ok(android.includes("koreader/settings/opds.lua"));
+  assert.ok(!android.includes("koreader/settings/opds.lua"));
   assert.ok(!android.includes("koreader/settings/kosync.lua"));
   assert.ok(android.includes("koreader/patches/2-books-kosync.lua"));
   assert.ok(android.includes("koreader/plugins/simpleui.koplugin/main.lua"));
+  assert.ok(android.includes("koreader/plugins/books.koplugin/main.lua"));
+  assert.ok(android.includes("koreader/plugins/books.koplugin/config.lua"));
+  assert.ok(android.includes("koreader/plugins/books.koplugin/_meta.lua"));
   assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.ifo"));
   assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.idx"));
   assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.dict.dz"));
@@ -74,16 +77,32 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
 
   const kobo = zipList(koboBundle.path);
   assert.ok(kobo.includes(".adds/koreader/books/"));
-  assert.ok(kobo.includes(".adds/koreader/settings/opds.lua"));
+  assert.ok(!kobo.includes(".adds/koreader/settings/opds.lua"));
   assert.ok(!kobo.includes(".adds/koreader/settings/kosync.lua"));
   assert.ok(kobo.includes(".adds/koreader/patches/2-books-kosync.lua"));
   assert.ok(kobo.includes(".adds/koreader/plugins/simpleui.koplugin/main.lua"));
+  assert.ok(kobo.includes(".adds/koreader/plugins/books.koplugin/main.lua"));
   assert.ok(kobo.includes(".adds/koreader/data/dict/English/English-English Wiktionary dictionary.ifo"));
   assert.ok(!kobo.some((entry) => entry.includes("/plugins/books-ai-dictionary.koplugin/")));
 
-  const opds = zipRead(androidBundle.path, "koreader/settings/opds.lua");
-  assert.match(opds, /https:\/\/books\.test\/catalog/);
-  assert.match(opds, /alpha-bravo-charlie-delta-echo-foxtrot/);
+  const booksConfig = zipRead(androidBundle.path, "koreader/plugins/books.koplugin/config.lua");
+  assert.match(booksConfig, /https:\/\/books\.test\/catalog/);
+  assert.match(booksConfig, /navcatalog\/4f6e6577657374\?library_id=library/);
+  assert.match(booksConfig, /alpha-bravo-charlie-delta-echo-foxtrot/);
+  const booksPlugin = zipRead(androidBundle.path, "koreader/plugins/books.koplugin/main.lua");
+  assert.match(booksPlugin, /runWhenOnline/);
+  assert.match(booksPlugin, /dofile\(plugin_dir \.\. "config\.lua"\)/);
+  assert.match(booksPlugin, /Synchronizing library…/);
+  assert.match(booksPlugin, /Sync Books/);
+  assert.match(booksPlugin, /Automatic Book Updates/);
+  assert.match(booksPlugin, /Books Library/);
+  assert.match(booksPlugin, /choice1_text = _\("Keep"\)/);
+  assert.match(booksPlugin, /util\.makePath/);
+  assert.match(booksPlugin, /genItemTableFromCatalog/);
+  assert.match(booksPlugin, /Update canceled — 1 book updated!/);
+  assert.match(booksPlugin, /\.part/);
+  assert.doesNotMatch(booksPlugin, /local _, name/);
+  assert.doesNotMatch(booksPlugin, /onNetworkConnected|onResume|scheduleIn/);
   assert.match(zipRead(androidBundle.path, "koreader/data/dict/English/English-English Wiktionary dictionary.ifo"), /bookname=English/);
 
   const patch = zipRead(androidBundle.path, "koreader/patches/2-books-kosync.lua");
@@ -128,7 +147,7 @@ test("starter bundles download cached assets when missing", () => {
 
   const bundle = koreader.generate(row, "koreader-android-kindle.zip", {
     downloadSimpleUi: () => {
-      const simpleUi = path.join(config.configDir, "simpleui.koplugin");
+      const simpleUi = path.join(config.configDir, "simpleui-2.1.koplugin");
       fs.mkdirSync(simpleUi, { recursive: true });
       fs.writeFileSync(path.join(simpleUi, "main.lua"), "return {}\n");
     },
@@ -147,7 +166,7 @@ test("KOReader starter bundles include AI dictionary plugin only when AI is enab
   state.createAccount({ name: "Alice", slug: "alice" });
   state.updateAccount("alice", { books_password: "alpha-bravo-charlie-delta-echo-foxtrot" });
   const row = state.getAccount("alice");
-  const simpleUi = path.join(config.configDir, "simpleui.koplugin");
+  const simpleUi = path.join(config.configDir, "simpleui-2.1.koplugin");
   fs.mkdirSync(simpleUi, { recursive: true });
   fs.writeFileSync(path.join(simpleUi, "main.lua"), "return {}\n");
   writeFakeDictionary(config);

@@ -75,7 +75,7 @@ Runtime state lives under the data directory (`BOOKS_HOST_DATA_DIR`, default `./
 | `data/config/state.json` | Account registry, Hardcover tokens, daily download counts |
 | `data/config/secrets.json` | Calibre admin password (generated on bootstrap, not rotated) |
 | `data/config/users.sqlite` | Calibre user database |
-| `data/config/simpleui.koplugin/` | Cached SimpleUI plugin source copied into KOReader starter bundles |
+| `data/config/simpleui-2.1.koplugin/` | Cached SimpleUI plugin source copied into KOReader starter bundles |
 | `data/library/` | Calibre book library — EPUB files and metadata |
 | `data/downloads/` | Anna's Archive download cache |
 | `data/import/` | Drop zone for manual EPUB imports |
