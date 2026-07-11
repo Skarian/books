@@ -49,7 +49,7 @@ Keep `.env`, `secrets/annas_secret_key`, `data/config/secrets.json` (Calibre adm
 
 KOReader setup ZIPs are generated on demand when a user opens the setup page and signs in with their Books username and password. The SimpleUI starter bundle downloads pinned SimpleUI `2.0.1` into `data/config/simpleui.koplugin` the first time it is needed; later requests reuse that cached copy.
 
-On a fresh KOReader installation with no existing cover-browser cache, the bundle defaults the Library to KOReader's **Mosaic with cover images** mode. KOReader retains its standard portrait and landscape grid dimensions, and the bundle preserves any existing display-mode preference.
+On the first Books setup, the bundle selects KOReader's **Mosaic with cover images** Library mode once. KOReader retains its standard portrait and landscape grid dimensions, and later user display-mode changes are preserved.
 
 Readest and CrossPoint setup ZIPs are also generated on demand and contain that user's catalog and KOSync settings.
 
