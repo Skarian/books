@@ -44,9 +44,12 @@ test("ISBN imports use Calibre metadata directly and keep operational identifier
   const calls = [];
   const { system, restore } = load(dir, (command, args) => {
     calls.push({ command, args: args.slice() });
+    if (command === "ebook-meta" && args.includes("--get-cover")) {
+      fs.writeFileSync(args[args.indexOf("--get-cover") + 1], "source cover");
+      return ok();
+    }
     if (command === "fetch-ebook-metadata") {
       if (calls.filter((call) => call.command === "fetch-ebook-metadata").length === 1) return { status: 1, stdout: "", stderr: "timeout" };
-      fs.writeFileSync(args[args.indexOf("--cover") + 1], "cover");
       return ok("<package><metadata /></package>\n");
     }
     if (command === "ebook-meta" && args.includes("--to-opf")) {
@@ -76,12 +79,15 @@ test("ISBN imports use Calibre metadata directly and keep operational identifier
     restore();
   }
 
+  const extract = calls.findIndex((call) => call.command === "ebook-meta" && call.args.includes("--get-cover"));
   const fetched = calls.findIndex((call) => call.command === "fetch-ebook-metadata");
   const apply = calls.findIndex((call) => call.command === "ebook-meta" && call.args.includes("--from-opf"));
   const toOpf = calls.findIndex((call) => call.command === "ebook-meta" && call.args.includes("--to-opf"));
   const polish = calls.findIndex((call) => call.command === "ebook-polish");
-  assert.deepEqual([fetched, apply, toOpf, polish].map((i) => i >= 0), [true, true, true, true]);
-  assert.ok(fetched < apply && apply < toOpf && toOpf < polish);
+  assert.deepEqual([extract, fetched, apply, toOpf, polish].map((i) => i >= 0), [true, true, true, true, true]);
+  assert.ok(extract < fetched && fetched < apply && apply < toOpf && toOpf < polish);
+  assert.ok(calls[extract].args.includes("--disallow-rendered-cover"));
+  assert.equal(calls[fetched].args.includes("--cover"), false);
   assert.ok(calls[fetched].args.includes("--isbn"));
   assert.ok(calls[fetched].args.includes("9780062010612"));
   assert.ok(calls[apply].args.includes("--isbn"));
@@ -93,11 +99,49 @@ test("ISBN imports use Calibre metadata directly and keep operational identifier
   assert.equal(calls[apply].args.includes("--language"), false);
 });
 
+test("import finalization fetches a cover only when the source has none", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-system-test-"));
+  const calls = [];
+  const { system, restore } = load(dir, (command, args) => {
+    calls.push({ command, args: args.slice() });
+    if (command === "ebook-meta" && args.includes("--get-cover")) return { status: 1, stdout: "", stderr: "no cover" };
+    if (command === "fetch-ebook-metadata") {
+      fs.writeFileSync(args[args.indexOf("--cover") + 1], "fetched cover");
+      return ok("<package><metadata /></package>\n");
+    }
+    if (command === "ebook-meta" && args.includes("--to-opf")) {
+      fs.writeFileSync(args[args.indexOf("--to-opf") + 1], "<package />\n");
+      return ok();
+    }
+    if (command === "ebook-polish") {
+      fs.writeFileSync(args.at(-1), "polished");
+      return ok();
+    }
+    return ok();
+  });
+
+  try {
+    const finalized = system._test.finalizedImportCopy(inputFile(dir), { title: "Power", authors: ["Jeffrey Pfeffer"] });
+    finalized.cleanup();
+  } finally {
+    restore();
+  }
+
+  const fetched = calls.find((call) => call.command === "fetch-ebook-metadata");
+  const polish = calls.find((call) => call.command === "ebook-polish");
+  assert.ok(fetched.args.includes("--cover"));
+  assert.equal(polish.args[polish.args.indexOf("--cover") + 1], fetched.args[fetched.args.indexOf("--cover") + 1]);
+});
+
 test("import finalization falls back to local metadata when fetch has no result", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-system-test-"));
   const calls = [];
   const { system, restore } = load(dir, (command, args) => {
     calls.push({ command, args: args.slice() });
+    if (command === "ebook-meta" && args.includes("--get-cover")) {
+      fs.writeFileSync(args[args.indexOf("--get-cover") + 1], "");
+      return ok();
+    }
     return command === "fetch-ebook-metadata" ? { status: 1, stdout: "", stderr: "not found" } : ok();
   });
 
@@ -119,6 +163,39 @@ test("import finalization falls back to local metadata when fetch has no result"
   assert.ok(local.args.includes("--language"));
   assert.equal(local.args.includes("--tags"), false);
   assert.equal(calls.some((call) => call.command === "ebook-polish"), false);
+});
+
+test("import finalization polishes a source cover when metadata fetch fails", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-system-test-"));
+  const calls = [];
+  const { system, restore } = load(dir, (command, args) => {
+    calls.push({ command, args: args.slice() });
+    if (command === "ebook-meta" && args.includes("--get-cover")) {
+      fs.writeFileSync(args[args.indexOf("--get-cover") + 1], "source cover");
+      return ok();
+    }
+    if (command === "fetch-ebook-metadata") return { status: 1, stdout: "", stderr: "not found" };
+    if (command === "ebook-meta" && args.includes("--to-opf")) {
+      fs.writeFileSync(args[args.indexOf("--to-opf") + 1], "<package />\n");
+      return ok();
+    }
+    if (command === "ebook-polish") {
+      fs.writeFileSync(args.at(-1), "polished");
+      return ok();
+    }
+    return ok();
+  });
+
+  try {
+    const finalized = system._test.finalizedImportCopy(inputFile(dir), { title: "Power", authors: ["Jeffrey Pfeffer"] });
+    finalized.cleanup();
+  } finally {
+    restore();
+  }
+
+  assert.equal(calls.filter((call) => call.command === "fetch-ebook-metadata").length, 3);
+  assert.equal(calls.some((call) => call.command === "fetch-ebook-metadata" && call.args.includes("--cover")), false);
+  assert.ok(calls.some((call) => call.command === "ebook-polish"));
 });
 
 test("Calibre imports use new records and ISBN metadata without title overrides", () => {

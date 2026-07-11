@@ -198,22 +198,34 @@ function metadataArgs(file, options = {}, localTruth = true) {
   return args;
 }
 
-function fetchedMetadata(tempDir, options = {}) {
+function nonemptyFile(file) {
+  return file && fs.existsSync(file) && fs.statSync(file).size;
+}
+
+function extractCover(file, tempDir) {
+  const cover = path.join(tempDir, "source-cover");
+  const result = run("ebook-meta", [file, "--get-cover", cover, "--disallow-rendered-cover"], { check: false });
+  return result.status === 0 && nonemptyFile(cover) ? cover : null;
+}
+
+function fetchedMetadata(tempDir, options = {}, includeCover = true) {
   if (!options.isbn && (!options.title || !options.authors || !options.authors.length)) return {};
-  const cover = path.join(tempDir, "cover.jpg");
-  const args = ["--opf", "--cover", cover, "--timeout", "20"];
+  const cover = path.join(tempDir, "fetched-cover");
+  const args = ["--opf", "--timeout", "20"];
+  if (includeCover) args.push("--cover", cover);
   if (options.isbn) args.push("--isbn", options.isbn);
   if (options.title) args.push("--title", options.title);
   if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
   let result;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (includeCover) fs.rmSync(cover, { force: true });
     result = run("fetch-ebook-metadata", args, { check: false });
     if (result.status === 0 && String(result.stdout || "").trim()) break;
   }
   if (result.status !== 0 || !String(result.stdout || "").trim()) return {};
   const opf = path.join(tempDir, "metadata.opf");
   fs.writeFileSync(opf, result.stdout, { mode: 0o600 });
-  return { opf, cover };
+  return { opf, cover: includeCover && nonemptyFile(cover) ? cover : null };
 }
 
 function polishImportCopy(file, tempDir, cover) {
@@ -231,11 +243,12 @@ function finalizedImportCopy(input, options = {}) {
   const output = path.join(tempDir, path.basename(input));
   try {
     fs.copyFileSync(input, output);
-    const fetched = fetchedMetadata(tempDir, options);
+    const sourceCover = extractCover(output, tempDir);
+    const fetched = fetchedMetadata(tempDir, options, !sourceCover);
     const args = metadataArgs(output, options, !options.isbn);
     if (fetched.opf) args.push("--from-opf", fetched.opf);
     run("ebook-meta", args);
-    polishImportCopy(output, tempDir, fetched.cover);
+    polishImportCopy(output, tempDir, sourceCover || fetched.cover);
     return { path: output, cleanup: () => fs.rmSync(tempDir, { recursive: true, force: true }) };
   } catch (error) {
     fs.rmSync(tempDir, { recursive: true, force: true });
