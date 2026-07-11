@@ -81,18 +81,6 @@ function writeLegacyKosyncPatch(file, settings, network, token) {
     "    changed = true",
     "  end",
     "end",
-    "if marker == nil then",
-    "  local original_package_path = package.path",
-    '  package.path = "plugins/coverbrowser.koplugin/?.lua;" .. package.path',
-    '  local ok_bim, bim = pcall(require, "bookinfomanager")',
-    "  package.path = original_package_path",
-    "  if ok_bim and bim then",
-    '    bim:saveSetting("filemanager_display_mode", "mosaic_image")',
-    '    bim:saveSetting("history_display_mode", "mosaic_image")',
-    '    bim:saveSetting("collection_display_mode", "mosaic_image")',
-    "    bim:closeDbConnection()",
-    "  end",
-    "end",
     "if changed then G_reader_settings:flush() end",
     ""
   ].join("\n"), { mode: 0o600 });
