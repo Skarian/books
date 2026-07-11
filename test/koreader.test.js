@@ -98,10 +98,15 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(patch, /G_reader_settings:saveSetting\("kosync", kosync\)/);
   assert.match(patch, /reader_defaults/);
   assert.match(patch, /"copt_font_size"\] = 30/);
-  assert.match(patch, /books_coverbrowser_default_v1/);
-  assert.match(patch, /bookinfo_cache\.sqlite3/);
+  assert.match(patch, /coverbrowser_initial_default_setup_done/);
+  assert.match(patch, /plugins\/coverbrowser\.koplugin\/\?\.lua/);
   assert.match(patch, /filemanager_display_mode/);
+  assert.match(patch, /history_display_mode/);
+  assert.match(patch, /collection_display_mode/);
+  assert.match(patch, /closeDbConnection/);
   assert.match(patch, /mosaic_image/);
+  assert.doesNotMatch(patch, /books_coverbrowser_default_v1/);
+  assert.doesNotMatch(patch, /bookinfo_cache\.sqlite3/);
   assert.doesNotMatch(patch, /nb_(?:cols|rows)_(?:portrait|landscape)/);
   assert.match(patch, /https:\/\/books\.test\/kosync/);
   assert.match(patch, /auto_sync"\] = true/);

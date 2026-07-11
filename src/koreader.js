@@ -44,7 +44,6 @@ function sha256(file) {
 
 function writeLegacyKosyncPatch(file, settings, network, token) {
   const readerDefaults = { copt_font_size: 30 };
-  const coverBrowserDefaultMarker = "books_coverbrowser_default_v1";
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   fs.writeFileSync(file, [
     `local token = ${lua(token)}`,
@@ -82,19 +81,19 @@ function writeLegacyKosyncPatch(file, settings, network, token) {
     "    changed = true",
     "  end",
     "end",
-    `if not G_reader_settings:isTrue(${lua(coverBrowserDefaultMarker)}) then`,
-    '  local cover_db = DataStorage:getSettingsDir() .. "/bookinfo_cache.sqlite3"',
-    '  if ok_lfs and lfs.attributes(cover_db, "mode") ~= "file" then',
-    "    local original_package_path = package.path",
-    '    package.path = DataStorage:getDataDir() .. "/plugins/coverbrowser.koplugin/?.lua;" .. package.path',
-    '    local ok_bim, bim = pcall(require, "bookinfomanager")',
-    "    package.path = original_package_path",
-    '    if ok_bim and bim and bim.getSetting and bim.saveSetting and bim:getSetting("filemanager_display_mode") == nil then',
+    'if not G_reader_settings:isTrue("coverbrowser_initial_default_setup_done") then',
+    "  local original_package_path = package.path",
+    '  package.path = "plugins/coverbrowser.koplugin/?.lua;" .. package.path',
+    '  local ok_bim, bim = pcall(require, "bookinfomanager")',
+    "  package.path = original_package_path",
+    "  if ok_bim and bim then",
+    '    if not bim:getSetting("filemanager_display_mode") and not bim:getSetting("history_display_mode") then',
     '      bim:saveSetting("filemanager_display_mode", "mosaic_image")',
+    '      bim:saveSetting("history_display_mode", "mosaic_image")',
+    '      bim:saveSetting("collection_display_mode", "mosaic_image")',
     "    end",
+    "    bim:closeDbConnection()",
     "  end",
-    `  G_reader_settings:makeTrue(${lua(coverBrowserDefaultMarker)})`,
-    "  changed = true",
     "end",
     "if changed then G_reader_settings:flush() end",
     ""
