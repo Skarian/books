@@ -68,6 +68,7 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.ok(android.includes("koreader/plugins/books.koplugin/main.lua"));
   assert.ok(android.includes("koreader/plugins/books.koplugin/config.lua"));
   assert.ok(android.includes("koreader/plugins/books.koplugin/_meta.lua"));
+  assert.ok(android.includes("koreader/plugins/books.koplugin/resume_home.lua"));
   assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.ifo"));
   assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.idx"));
   assert.ok(android.includes("koreader/data/dict/English/English-English Wiktionary dictionary.dict.dz"));
@@ -90,6 +91,7 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(booksConfig, /navcatalog\/4f6e6577657374\?library_id=library/);
   assert.match(booksConfig, /alpha-bravo-charlie-delta-echo-foxtrot/);
   const booksPlugin = zipRead(androidBundle.path, "koreader/plugins/books.koplugin/main.lua");
+  const resumeHome = zipRead(androidBundle.path, "koreader/plugins/books.koplugin/resume_home.lua");
   assert.match(booksPlugin, /runWhenOnline/);
   assert.match(booksPlugin, /dofile\(plugin_dir \.\. "config\.lua"\)/);
   assert.match(booksPlugin, /Synchronizing library…/);
@@ -97,6 +99,22 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(booksPlugin, /\{ "sui_settings", "history", action, "power" \}/);
   assert.match(booksPlugin, /Config\.saveTabConfig\{ "homescreen", "home", group \}/);
   assert.match(booksPlugin, /books_simpleui_seeded_v2/);
+  assert.match(booksPlugin, /ResumeHome\.seedIfFresh/);
+  assert.match(booksPlugin, /ResumeHome\.applyRecentTitles/);
+  assert.match(resumeHome, /simpleui_onboarding_done/);
+  assert.match(resumeHome, /SUISettings:get\("simpleui_layout"\) == nil/);
+  assert.match(resumeHome, /SUISettings:get\("simpleui_hs_active_preset"\) == nil/);
+  assert.match(resumeHome, /modules = \{ "currently", "recent" \}/);
+  assert.match(resumeHome, /recent_show_finished"\] = false/);
+  assert.match(resumeHome, /return 3, 1, 0, 3, Screen:scaleBySize\(18\)/);
+  assert.match(resumeHome, /return 4, 2, 0, 2, Screen:scaleBySize\(48\)/);
+  assert.match(resumeHome, /return 5, 1, 0, 5, Screen:scaleBySize\(18\)/);
+  assert.match(resumeHome, /height_overflow_show_ellipsis = height ~= nil/);
+  assert.match(resumeHome, /BottomContainer:new/);
+  assert.match(resumeHome, /local extra = Screen:scaleBySize\(4\)/);
+  assert.match(resumeHome, /UI\.LABEL_PAD_BOT = UI\.LABEL_PAD_BOT \+ extra/);
+  assert.match(resumeHome, /return getScaledLabelH\(\.\.\.\) \+ extra/);
+  assert.doesNotMatch(resumeHome, /simpleui_topbar_config|simpleui_bar_tabs/);
   assert.match(booksPlugin, /Automatic Book Updates/);
   assert.match(booksPlugin, /Books Library/);
   assert.match(booksPlugin, /choice1_text = _\("Keep"\)/);

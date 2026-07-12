@@ -94,10 +94,21 @@ function Books:_setupOPDS()
 end
 
 function Books:_setupSimpleUI()
-    if G_reader_settings:isTrue("books_simpleui_seeded_v2") then return end
     local ok, QA = pcall(require, "sui_quickactions")
     local ok_config, Config = pcall(require, "sui_config")
     if not ok or not ok_config then return end
+    local ok_home, ResumeHome = pcall(dofile, plugin_dir .. "resume_home.lua")
+    if ok_home then
+        local seeded, seed_err = pcall(ResumeHome.seedIfFresh)
+        if not seeded then logger.warn("Books resume homescreen setup failed:", seed_err) end
+    end
+    if G_reader_settings:isTrue("books_simpleui_seeded_v2") then
+        if ok_home then
+            local applied, apply_err = pcall(ResumeHome.applyRecentTitles)
+            if not applied then logger.warn("Books recent-title renderer failed:", apply_err) end
+        end
+        return
+    end
     local list, action, group = QA.getCustomQAList()
     for _, id in ipairs(list) do
         local item = QA.getCustomQAConfig(id)
@@ -131,6 +142,10 @@ function Books:_setupSimpleUI()
         Config.saveTabConfig{ "homescreen", "home", group }
     end
     G_reader_settings:saveSetting("books_simpleui_seeded_v2", true):flush()
+    if ok_home then
+        local applied, apply_err = pcall(ResumeHome.applyRecentTitles)
+        if not applied then logger.warn("Books recent-title renderer failed:", apply_err) end
+    end
     local simpleui = self.ui._simpleui_plugin or self.ui.simpleui
     if simpleui and simpleui._rebuildAllNavbars then simpleui:_rebuildAllNavbars() end
 end
