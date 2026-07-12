@@ -85,19 +85,49 @@ function M.applyRecentTitles()
     local PAD = UI.PAD
     local _ = require("sui_i18n").translate
 
+    -- KOReader's Android default sizes UI from the viewport, while the first
+    -- review renders accidentally combined viewport and a forced 393 DPI.
+    -- Keep Android on its correct automatic DPI behavior and reproduce the
+    -- approved body hierarchy explicitly. This touches only SimpleUI content;
+    -- the native status bar and bottom navigation remain at their defaults.
+    local ANDROID_VISUAL_SCALE = 1.18
+    local COMPACT_VISUAL_SCALE = 1.16
+    local function isAndroidPortrait()
+        local width, height = Screen:getWidth(), Screen:getHeight()
+        return width >= 800 and height > width
+    end
+    local function bodyVisualScale()
+        if Screen:getWidth() < 800 then return COMPACT_VISUAL_SCALE end
+        if isAndroidPortrait() then return ANDROID_VISUAL_SCALE end
+        return 1
+    end
+
     -- The 600x800 compact profile cannot fit SimpleUI's full 70-unit clock,
     -- featured block, Recent title/percentage, and navbar simultaneously.
-    -- Scale only the two tall elements on that profile; Android keeps the
-    -- normal module and featured-cover sizes.
-    if not Config._books_resume_compact_scale_applied then
+    -- Scale only the two tall elements on that profile. Android receives its
+    -- reviewed body scale independently below.
+    if not Config._books_resume_device_scale_applied then
         local getModuleScale = Config.getModuleScale
+        local getLabelScale = Config.getLabelScale
         local getThumbScale = Config.getThumbScale
         Config.getModuleScale = function(mod_id, pfx)
             local scale = getModuleScale(mod_id, pfx)
             if Screen:getWidth() < 800 and mod_id == "clock" then
-                return scale * 0.40
+                return scale * 0.40 * COMPACT_VISUAL_SCALE
+            end
+            if Screen:getWidth() < 800
+                and (mod_id == "currently" or mod_id == "recent") then
+                return scale * COMPACT_VISUAL_SCALE
+            end
+            if isAndroidPortrait()
+                and (mod_id == "clock" or mod_id == "currently" or mod_id == "recent") then
+                return scale * ANDROID_VISUAL_SCALE
             end
             return scale
+        end
+        Config.getLabelScale = function()
+            local scale = getLabelScale()
+            return scale * bodyVisualScale()
         end
         Config.getThumbScale = function(mod_id, pfx)
             local scale = getThumbScale(mod_id, pfx)
@@ -106,7 +136,7 @@ function M.applyRecentTitles()
             end
             return scale
         end
-        Config._books_resume_compact_scale_applied = true
+        Config._books_resume_device_scale_applied = true
     end
 
     -- Keep the two book sections on one shared rhythm. SimpleUI's section
@@ -127,11 +157,13 @@ function M.applyRecentTitles()
     local function layoutProfile()
         local width, height = Screen:getWidth(), Screen:getHeight()
         if width < 800 then
-            return 3, 0.85, 0, 3, Screen:scaleBySize(18)
+            return 3, 0.85, 0, 3,
+                math.floor(Screen:scaleBySize(18) * COMPACT_VISUAL_SCALE)
         elseif height > width then
             -- Android uses two rows of three: left, center, right. This uses
             -- the available width without shrinking the titled covers.
-            return 6, 1.4, 0, 3, Screen:scaleBySize(48)
+            return 6, 1.4, 0, 3,
+                math.floor(Screen:scaleBySize(48) * ANDROID_VISUAL_SCALE)
         end
         return 5, 1, 0, 5, Screen:scaleBySize(18)
     end
@@ -188,7 +220,8 @@ function M.applyRecentTitles()
         -- are narrower than their grid slot so the first/last cards can anchor
         -- to the module edges while every element retains one centerline.
         local card_w = math.min(slot_w,
-            d.RECENT_W + Screen:scaleBySize(48))
+            d.RECENT_W + math.floor(Screen:scaleBySize(48)
+                * bodyVisualScale()))
         local column_gap = columns > 1
             and math.max(0, math.floor((inner_w - columns * card_w) / (columns - 1)))
             or 0
