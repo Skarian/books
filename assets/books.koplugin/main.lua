@@ -48,6 +48,14 @@ function Books:_setupCoverBrowser()
                 and collections == "mosaic_image" then
             BookInfoManager:saveSetting("filemanager_display_mode", "mosaic_image")
         end
+        if config.home_profile == "kobo" then
+            if BookInfoManager:getSetting("nb_cols_portrait") == nil then
+                BookInfoManager:saveSetting("nb_cols_portrait", 3)
+            end
+            if BookInfoManager:getSetting("nb_rows_portrait") == nil then
+                BookInfoManager:saveSetting("nb_rows_portrait", 2)
+            end
+        end
         BookInfoManager:closeDbConnection()
         G_reader_settings:makeTrue("books_coverbrowser_seeded"):flush()
     end)
