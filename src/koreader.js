@@ -16,6 +16,7 @@ const DICTIONARY_SHA256 = "2800f630d2975ea29a7b5763e7d79ed71dab9abcc6157534d75c7
 const DICTIONARY_DIR = path.join(config.configDir, "english-wiktionary-stardict");
 const AI_DICTIONARY_DIR = path.join(__dirname, "..", "assets", "books-ai-dictionary.koplugin");
 const BOOKS_PLUGIN_DIR = path.join(__dirname, "..", "assets", "books.koplugin");
+const KOBO_STYLE_SCREENSAVER_PATCH = path.join(__dirname, "..", "assets", "kobo-patches", "2-kobo-style-screensaver.lua");
 const BUNDLES = {
   "koreader-android-kindle.zip": "koreader",
   "koreader-kobo.zip": ".adds/koreader"
@@ -43,7 +44,7 @@ function sha256(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
-function writeLegacyKosyncPatch(file, settings, network, token) {
+function writeLegacyKosyncPatch(file, settings, network, token, koboStyle) {
   const readerDefaults = {
     copt_font_size: 30,
     twelve_hour_clock: true
@@ -54,6 +55,7 @@ function writeLegacyKosyncPatch(file, settings, network, token) {
     `local desired = ${lua(settings)}`,
     `local network = ${lua(network)}`,
     `local reader_defaults = ${lua(readerDefaults)}`,
+    ...(koboStyle ? [`local kobo_style = ${lua(koboStyle)}`] : []),
     'local DataStorage = require("datastorage")',
     'local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")',
     'local books_dir = (DataStorage:getDataDir() or "."):gsub("/+$", "") .. "/books"',
@@ -85,9 +87,32 @@ function writeLegacyKosyncPatch(file, settings, network, token) {
     "    changed = true",
     "  end",
     "end",
+    ...(koboStyle ? [
+      'if not G_reader_settings:isTrue("books_kobo_style_screensaver_v1") then',
+      '  local current_type = G_reader_settings:readSetting("screensaver_type")',
+      '  if current_type == nil or current_type == "cover" then',
+      '    G_reader_settings:saveSetting("screensaver_type", "kobo_style")',
+      "    changed = true",
+      "  end",
+      "  for key, value in pairs(kobo_style) do",
+      "    if G_reader_settings:readSetting(key) == nil then",
+      "      G_reader_settings:saveSetting(key, value)",
+      "      changed = true",
+      "    end",
+      "  end",
+      '  G_reader_settings:makeTrue("books_kobo_style_screensaver_v1")',
+      "  changed = true",
+      "end"
+    ] : []),
     "if changed then G_reader_settings:flush() end",
     ""
   ].join("\n"), { mode: 0o600 });
+}
+
+function stageKoboStyleScreensaver(root) {
+  const target = path.join(root, "patches", "2-kobo-style-screensaver.lua");
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  fs.copyFileSync(KOBO_STYLE_SCREENSAVER_PATCH, target);
 }
 
 function downloadSimpleUi() {
@@ -199,14 +224,28 @@ function generate(row, name, options = {}) {
   const network = {
     wifi_enable_action: "turn_on"
   };
+  let koboStyle;
   if (name === "koreader-kobo.zip") {
     network.wifi_disable_action = "turn_off";
     network.auto_disable_wifi = true;
     network.auto_restore_wifi = true;
+    koboStyle = {
+      kobo_style_language: "en",
+      kobo_style_global_scale: 100,
+      kobo_style_show_title: true,
+      kobo_style_show_chapter: true,
+      kobo_style_show_progress: true,
+      kobo_style_show_time_left: true,
+      kobo_style_show_today_time: false,
+      kobo_style_show_cover: true,
+      kobo_style_show_pages: false,
+      kobo_style_show_quote: false
+    };
   }
   try {
     fs.mkdirSync(path.join(root, "books"), { recursive: true, mode: 0o700 });
-    writeLegacyKosyncPatch(path.join(root, "patches", "2-books-kosync.lua"), kosync, network, state.md5(`${row.slug}:${kosync.userkey}:${kosync.custom_server}:books-folder-v2`));
+    writeLegacyKosyncPatch(path.join(root, "patches", "2-books-kosync.lua"), kosync, network, state.md5(`${row.slug}:${kosync.userkey}:${kosync.custom_server}:books-folder-v2`), koboStyle);
+    if (koboStyle) stageKoboStyleScreensaver(root);
     stageSimpleUi(root, options.downloadSimpleUi);
     stageBooksPlugin(root, row, name === "koreader-kobo.zip" ? "kobo" : "android");
     stageDictionary(root, options.downloadDictionary);
