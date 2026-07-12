@@ -201,6 +201,9 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.doesNotMatch(patch, /wifi_disable_action/);
   assert.doesNotMatch(patch, /auto_disable_wifi/);
   assert.doesNotMatch(patch, /auto_restore_wifi/);
+  assert.match(patch, /collate == nil or collate == "strcoll"/);
+  assert.match(patch, /saveSetting\("collate", "access"\)/);
+  assert.match(patch, /delSetting\("reverse_collate"\)/);
 
   const koboPatch = zipRead(koboBundle.path, ".adds/koreader/patches/2-books-kosync.lua");
   assert.match(koboPatch, /"copt_font_size"\] = 30/);

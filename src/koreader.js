@@ -71,6 +71,8 @@ function writeLegacyKosyncPatch(file, settings, network, token, koboStyle) {
     '  G_reader_settings:saveSetting("download_dir", books_dir)',
     '  G_reader_settings:saveSetting("lastdir", books_dir)',
     '  G_reader_settings:saveSetting("quickstart_shown_version", 9999999999)',
+    '  local collate = G_reader_settings:readSetting("collate")',
+    '  if collate == nil or collate == "strcoll" then G_reader_settings:saveSetting("collate", "access"); G_reader_settings:delSetting("reverse_collate") end',
     '  local help_dir = (DataStorage:getDataDir() or "."):gsub("/+$", "") .. "/help"',
     '  if ok_lfs and lfs.attributes(help_dir, "mode") == "directory" then for name in lfs.dir(help_dir) do if name:match("^quickstart%-.*%.html$") then os.remove(help_dir .. "/" .. name) end end end',
     '  G_reader_settings:saveSetting("kosync", kosync)',
