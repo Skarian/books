@@ -168,13 +168,14 @@ function stageAiDictionary(root) {
   fs.cpSync(AI_DICTIONARY_DIR, path.join(root, "plugins", "books-ai-dictionary.koplugin"), { recursive: true });
 }
 
-function stageBooksPlugin(root, row) {
+function stageBooksPlugin(root, row, homeProfile) {
   const target = path.join(root, "plugins", "books.koplugin");
   fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   fs.cpSync(BOOKS_PLUGIN_DIR, target, { recursive: true });
   writeLua(path.join(target, "config.lua"), {
     browse_url: `https://${config.publicHost}/catalog`,
     updates_url: `https://${config.publicHost}/catalog/navcatalog/4f6e6577657374?library_id=library`,
+    home_profile: homeProfile,
     username: row.slug,
     password: row.books_password
   });
@@ -207,7 +208,7 @@ function generate(row, name, options = {}) {
     fs.mkdirSync(path.join(root, "books"), { recursive: true, mode: 0o700 });
     writeLegacyKosyncPatch(path.join(root, "patches", "2-books-kosync.lua"), kosync, network, state.md5(`${row.slug}:${kosync.userkey}:${kosync.custom_server}:books-folder-v2`));
     stageSimpleUi(root, options.downloadSimpleUi);
-    stageBooksPlugin(root, row);
+    stageBooksPlugin(root, row, name === "koreader-kobo.zip" ? "kobo" : "android");
     stageDictionary(root, options.downloadDictionary);
     if (ai.enabled()) stageAiDictionary(root);
     system.run("zip", ["-qr", zipPath, rootName.split("/")[0]], { cwd: tempDir });

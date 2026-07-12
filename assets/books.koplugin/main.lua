@@ -99,14 +99,14 @@ function Books:_setupSimpleUI()
     if not ok or not ok_config then return end
     local ok_home, ResumeHome = pcall(dofile, plugin_dir .. "resume_home.lua")
     if ok_home then
-        local seeded, seed_err = pcall(ResumeHome.seedIfFresh)
+        local seeded, seed_err = pcall(ResumeHome.seedIfFresh, config.home_profile)
         if not seeded then logger.warn("Books resume homescreen setup failed:", seed_err) end
         local scaled, scale_err = pcall(ResumeHome.applyAppsPopupScale)
         if not scaled then logger.warn("Books Apps popup scaling failed:", scale_err) end
     end
     if G_reader_settings:isTrue("books_simpleui_seeded_v2") then
         if ok_home then
-            local applied, apply_err = pcall(ResumeHome.applyRecentTitles)
+            local applied, apply_err = pcall(ResumeHome.applyRecentTitles, config.home_profile)
             if not applied then logger.warn("Books recent-title renderer failed:", apply_err) end
         end
         return
@@ -145,7 +145,7 @@ function Books:_setupSimpleUI()
     end
     G_reader_settings:saveSetting("books_simpleui_seeded_v2", true):flush()
     if ok_home then
-        local applied, apply_err = pcall(ResumeHome.applyRecentTitles)
+        local applied, apply_err = pcall(ResumeHome.applyRecentTitles, config.home_profile)
         if not applied then logger.warn("Books recent-title renderer failed:", apply_err) end
     end
     local simpleui = self.ui._simpleui_plugin or self.ui.simpleui

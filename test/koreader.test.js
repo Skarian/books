@@ -87,8 +87,11 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.ok(!kobo.some((entry) => entry.includes("/plugins/books-ai-dictionary.koplugin/")));
 
   const booksConfig = zipRead(androidBundle.path, "koreader/plugins/books.koplugin/config.lua");
+  const koboBooksConfig = zipRead(koboBundle.path, ".adds/koreader/plugins/books.koplugin/config.lua");
   assert.match(booksConfig, /https:\/\/books\.test\/catalog/);
   assert.match(booksConfig, /navcatalog\/4f6e6577657374\?library_id=library/);
+  assert.match(booksConfig, /\["home_profile"\] = "android"/);
+  assert.match(koboBooksConfig, /\["home_profile"\] = "kobo"/);
   assert.match(booksConfig, /alpha-bravo-charlie-delta-echo-foxtrot/);
   const booksPlugin = zipRead(androidBundle.path, "koreader/plugins/books.koplugin/main.lua");
   const resumeHome = zipRead(androidBundle.path, "koreader/plugins/books.koplugin/resume_home.lua");
@@ -100,12 +103,17 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(booksPlugin, /Config\.saveTabConfig\{ "homescreen", "home", group \}/);
   assert.match(booksPlugin, /books_simpleui_seeded_v2/);
   assert.match(booksPlugin, /ResumeHome\.seedIfFresh/);
+  assert.match(booksPlugin, /config\.home_profile/);
   assert.match(booksPlugin, /ResumeHome\.applyRecentTitles/);
   assert.match(booksPlugin, /ResumeHome\.applyAppsPopupScale/);
   assert.match(resumeHome, /simpleui_onboarding_done/);
   assert.match(resumeHome, /SUISettings:get\("simpleui_layout"\) == nil/);
   assert.match(resumeHome, /SUISettings:get\("simpleui_hs_active_preset"\) == nil/);
   assert.match(resumeHome, /modules = \{ "clock", "currently", "recent" \}/);
+  assert.match(resumeHome, /modules = \{ "clock", "quote", "coverdeck" \}/);
+  assert.match(resumeHome, /clock_scale"\] = 100/);
+  assert.match(resumeHome, /coverdeck_thumb_scale"\] = 110/);
+  assert.match(resumeHome, /coverdeck_show_finished"\] = false/);
   assert.match(resumeHome, /clock_enabled"\] = true/);
   assert.match(resumeHome, /clock_date"\] = false/);
   assert.match(resumeHome, /clock_battery"\] = false/);
@@ -116,12 +124,14 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(resumeHome, /opts\.name == "sui_win_qa_folder"/);
   assert.match(resumeHome, /win\._inner_w = win\._modal_w - 2 \* win\._pad_h/);
   assert.match(resumeHome, /math\.floor\(Screen:scaleBySize\(48\) \* ANDROID_VISUAL_SCALE\)/);
+  assert.match(resumeHome, /return 6, 1\.47, 0, 3/);
   assert.match(resumeHome, /return 5, 1, 0, 5, Screen:scaleBySize\(18\)/);
   assert.doesNotMatch(resumeHome, /columns = math\.min\(columns, #books\)/);
   assert.match(resumeHome, /height_overflow_show_ellipsis = height ~= nil/);
   assert.match(resumeHome, /BottomContainer:new/);
   assert.match(resumeHome, /LeftContainer:new/);
   assert.match(resumeHome, /HorizontalSpan:new\{ width = column_gap \}/);
+  assert.match(resumeHome, /card_w = d\.RECENT_W/);
   assert.match(resumeHome, /\* bodyVisualScale\(\)/);
   assert.match(resumeHome, /title_fs \* 0\.90/);
   assert.match(resumeHome, /mod_id == "clock"/);

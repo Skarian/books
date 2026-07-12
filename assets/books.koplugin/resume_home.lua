@@ -16,7 +16,7 @@ local function visualScale()
     return width < 800 and 1.16 or 1.18
 end
 
-function M.seedIfFresh()
+function M.seedIfFresh(profile)
     local SUISettings = require("sui_store")
 
     -- SimpleUI sets onboarding_done after any preset choice. Requiring the
@@ -27,12 +27,14 @@ function M.seedIfFresh()
         and SUISettings:get("simpleui_hs_active_preset") == nil
     if not untouched then return false end
 
+    profile = profile == "kobo" and "kobo" or "android"
     local settings = {
         ["simpleui_layout"] = {
             pages = { { id = 1, modules = { "clock", "currently", "recent" } } },
         },
         [PFX .. "quote_enabled"] = false,
         [PFX .. "clock_enabled"] = true,
+        [PFX .. "clock_scale"] = 100,
         [PFX .. "clock_date"] = false,
         [PFX .. "clock_battery"] = false,
         [PFX .. "currently_enabled"] = true,
@@ -59,13 +61,38 @@ function M.seedIfFresh()
         -- Skip SimpleUI's preset picker: this bundle has supplied the preset.
         ["simpleui_onboarding_done"] = true,
     }
+    if profile == "kobo" then
+        settings["simpleui_layout"] = {
+            pages = { { id = 1, modules = { "clock", "quote", "coverdeck" } } },
+        }
+        settings[PFX .. "quote_enabled"] = true
+        settings[PFX .. "currently_enabled"] = false
+        settings[PFX .. "recent_enabled"] = false
+        settings[PFX .. "coverdeck_enabled"] = true
+        settings[PFX .. "coverdeck_scale"] = 100
+        settings[PFX .. "coverdeck_thumb_scale"] = 110
+        settings[PFX .. "coverdeck_item_label_scale"] = 100
+        settings[PFX .. "coverdeck_source"] = "recent"
+        settings[PFX .. "coverdeck_show_title"] = true
+        settings[PFX .. "coverdeck_show_author"] = true
+        settings[PFX .. "coverdeck_show_progress"] = true
+        settings[PFX .. "coverdeck_show_stats"] = true
+        settings[PFX .. "coverdeck_show_percent"] = true
+        settings[PFX .. "coverdeck_show_book_days"] = false
+        settings[PFX .. "coverdeck_show_book_time"] = false
+        settings[PFX .. "coverdeck_show_book_remaining"] = false
+        settings[PFX .. "coverdeck_show_finished"] = false
+        settings[PFX .. "coverdeck_main_order"] = {
+            "covers", "title", "author", "progress", "stats",
+        }
+    end
     for key, value in pairs(settings) do SUISettings:set(key, value) end
     return true
 end
 
-function M.applyRecentTitles()
+function M.applyRecentTitles(profile)
     local SUISettings = require("sui_store")
-    if not SUISettings:isTrue(MARKER) then return false end
+    if not SUISettings:isTrue(MARKER) or profile == "kobo" then return false end
 
     local Recent = require("desktop_modules/module_recent")
     if Recent._books_resume_home_applied then return true end
@@ -165,7 +192,7 @@ function M.applyRecentTitles()
         elseif height > width then
             -- Android uses two rows of three: left, center, right. This uses
             -- the available width without shrinking the titled covers.
-            return 6, 1.4, 0, 3,
+            return 6, 1.47, 0, 3,
                 math.floor(Screen:scaleBySize(48) * ANDROID_VISUAL_SCALE)
         end
         return 5, 1, 0, 5, Screen:scaleBySize(18)
@@ -222,9 +249,14 @@ function M.applyRecentTitles()
         -- Treat the cover, title, and percentage as one centered card. Cards
         -- are narrower than their grid slot so the first/last cards can anchor
         -- to the module edges while every element retains one centerline.
-        local card_w = math.min(slot_w,
-            d.RECENT_W + math.floor(Screen:scaleBySize(48)
-                * bodyVisualScale()))
+        local card_w
+        if isAndroidPortrait() then
+            card_w = d.RECENT_W
+        else
+            card_w = math.min(slot_w,
+                d.RECENT_W + math.floor(Screen:scaleBySize(48)
+                    * bodyVisualScale()))
+        end
         local column_gap = columns > 1
             and math.max(0, math.floor((inner_w - columns * card_w) / (columns - 1)))
             or 0
