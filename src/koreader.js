@@ -44,7 +44,10 @@ function sha256(file) {
 }
 
 function writeLegacyKosyncPatch(file, settings, network, token) {
-  const readerDefaults = { copt_font_size: 30 };
+  const readerDefaults = {
+    copt_font_size: 30,
+    twelve_hour_clock: true
+  };
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   fs.writeFileSync(file, [
     `local token = ${lua(token)}`,
