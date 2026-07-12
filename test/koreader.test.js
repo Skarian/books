@@ -104,6 +104,15 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(booksPlugin, /genItemTableFromCatalog/);
   assert.match(booksPlugin, /Update canceled — 1 book updated!/);
   assert.match(booksPlugin, /\.part/);
+  assert.match(booksPlugin, /books_coverbrowser_seeded/);
+  assert.match(booksPlugin, /filemanager_display_mode/);
+  assert.match(booksPlugin, /history_display_mode/);
+  assert.match(booksPlugin, /collection_display_mode/);
+  assert.match(booksPlugin, /list_image_meta/);
+  assert.match(booksPlugin, /mosaic_image/);
+  assert.match(booksPlugin, /BookInfoManager:closeDbConnection\(\)/);
+  assert.doesNotMatch(booksPlugin, /setDisplayMode|registerPatchPluginFunc/);
+  assert.doesNotMatch(booksPlugin, /nb_(?:cols|rows)_(?:portrait|landscape)/);
   assert.doesNotMatch(booksPlugin, /local _, name/);
   assert.doesNotMatch(booksPlugin, /onNetworkConnected|onResume|scheduleIn/);
   assert.match(zipRead(androidBundle.path, "koreader/data/dict/English/English-English Wiktionary dictionary.ifo"), /bookname=English/);

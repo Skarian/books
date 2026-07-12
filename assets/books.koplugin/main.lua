@@ -26,10 +26,32 @@ end
 local function notice(text) UIManager:show(InfoMessage:new{ text = text, timeout = 3 }) end
 
 function Books:init()
+    self:_setupCoverBrowser()
     UIManager:nextTick(function()
         self:_setupOPDS()
         self:_setupSimpleUI()
     end)
+end
+
+function Books:_setupCoverBrowser()
+    if G_reader_settings:isTrue("books_coverbrowser_seeded") then return end
+    local ok, err = pcall(function()
+        local BookInfoManager = require("bookinfomanager")
+        local filemanager = BookInfoManager:getSetting("filemanager_display_mode")
+        local history = BookInfoManager:getSetting("history_display_mode")
+        local collections = BookInfoManager:getSetting("collection_display_mode")
+        if not filemanager and not history and not collections then
+            BookInfoManager:saveSetting("filemanager_display_mode", "mosaic_image")
+            BookInfoManager:saveSetting("history_display_mode", "mosaic_image")
+            BookInfoManager:saveSetting("collection_display_mode", "mosaic_image")
+        elseif filemanager == "list_image_meta" and history == "mosaic_image"
+                and collections == "mosaic_image" then
+            BookInfoManager:saveSetting("filemanager_display_mode", "mosaic_image")
+        end
+        BookInfoManager:closeDbConnection()
+        G_reader_settings:makeTrue("books_coverbrowser_seeded"):flush()
+    end)
+    if not ok then logger.warn("Books cover mosaic setup failed:", err) end
 end
 
 function Books:_setupOPDS()

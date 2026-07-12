@@ -40,7 +40,7 @@ Repeat on each Readest device. Readest may copy catalog settings across signed-i
 
 ## KOReader
 
-If the owner sent the KOReader setup page, open it, sign in with your Books username and password, download the right ZIP for your device, extract it at the device storage root, and restart KOReader. Android users should use KOReader's GitHub release APK. Progress sync is enabled by default for books downloaded from the catalog.
+If the owner sent the KOReader setup page, open it, sign in with your Books username and password, download the right ZIP for your device, extract it at the device storage root, and restart KOReader. Android users should use KOReader's GitHub release APK. Progress sync is enabled by default for books downloaded from the catalog. A fresh or untouched stock Library starts in **Mosaic with cover images** mode; existing customized Library layouts are preserved.
 
 Manual setup:
 
