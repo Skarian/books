@@ -101,6 +101,8 @@ function Books:_setupSimpleUI()
     if ok_home then
         local seeded, seed_err = pcall(ResumeHome.seedIfFresh)
         if not seeded then logger.warn("Books resume homescreen setup failed:", seed_err) end
+        local scaled, scale_err = pcall(ResumeHome.applyAppsPopupScale)
+        if not scaled then logger.warn("Books Apps popup scaling failed:", scale_err) end
     end
     if G_reader_settings:isTrue("books_simpleui_seeded_v2") then
         if ok_home then

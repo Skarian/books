@@ -101,6 +101,7 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(booksPlugin, /books_simpleui_seeded_v2/);
   assert.match(booksPlugin, /ResumeHome\.seedIfFresh/);
   assert.match(booksPlugin, /ResumeHome\.applyRecentTitles/);
+  assert.match(booksPlugin, /ResumeHome\.applyAppsPopupScale/);
   assert.match(resumeHome, /simpleui_onboarding_done/);
   assert.match(resumeHome, /SUISettings:get\("simpleui_layout"\) == nil/);
   assert.match(resumeHome, /SUISettings:get\("simpleui_hs_active_preset"\) == nil/);
@@ -112,6 +113,8 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(resumeHome, /COMPACT_VISUAL_SCALE = 1\.16/);
   assert.match(resumeHome, /math\.floor\(Screen:scaleBySize\(18\) \* COMPACT_VISUAL_SCALE\)/);
   assert.match(resumeHome, /ANDROID_VISUAL_SCALE = 1\.18/);
+  assert.match(resumeHome, /opts\.name == "sui_win_qa_folder"/);
+  assert.match(resumeHome, /win\._inner_w = win\._modal_w - 2 \* win\._pad_h/);
   assert.match(resumeHome, /math\.floor\(Screen:scaleBySize\(48\) \* ANDROID_VISUAL_SCALE\)/);
   assert.match(resumeHome, /return 5, 1, 0, 5, Screen:scaleBySize\(18\)/);
   assert.doesNotMatch(resumeHome, /columns = math\.min\(columns, #books\)/);

@@ -9,6 +9,13 @@ local M = {}
 local MARKER = "books_resume_home_v1"
 local PFX = "simpleui_hs_"
 
+local function visualScale()
+    local Screen = require("device").screen
+    local width, height = Screen:getWidth(), Screen:getHeight()
+    if height <= width then return 1 end
+    return width < 800 and 1.16 or 1.18
+end
+
 function M.seedIfFresh()
     local SUISettings = require("sui_store")
 
@@ -96,11 +103,7 @@ function M.applyRecentTitles()
         local width, height = Screen:getWidth(), Screen:getHeight()
         return width >= 800 and height > width
     end
-    local function bodyVisualScale()
-        if Screen:getWidth() < 800 then return COMPACT_VISUAL_SCALE end
-        if isAndroidPortrait() then return ANDROID_VISUAL_SCALE end
-        return 1
-    end
+    local bodyVisualScale = visualScale
 
     -- The 600x800 compact profile cannot fit SimpleUI's full 70-unit clock,
     -- featured block, Recent title/percentage, and navbar simultaneously.
@@ -360,6 +363,29 @@ function M.applyRecentTitles()
     -- with orientation, so a complete lightweight module rebuild is safest.
     function Recent.updateStats() return false end
     Recent._books_resume_home_applied = true
+    return true
+end
+
+function M.applyAppsPopupScale()
+    local Settings = require("sui_store")
+    local Window = require("sui_window")
+    if not Settings:isTrue(MARKER) or Window._books_apps_scale then return false end
+
+    local new = Window.new
+    Window.new = function(self, opts)
+        local win = new(self, opts)
+        local scale = visualScale()
+        if type(opts) == "table" and opts.name == "sui_win_qa_folder" and scale > 1
+            and type(win._scale) == "number" and type(win._modal_w) == "number"
+            and type(win._pad_h) == "number" and type(win._pad_v) == "number" then
+            win._scale = win._scale * scale
+            win._pad_h = math.floor(win._pad_h * scale)
+            win._pad_v = math.floor(win._pad_v * scale)
+            win._inner_w = win._modal_w - 2 * win._pad_h
+        end
+        return win
+    end
+    Window._books_apps_scale = true
     return true
 end
 
