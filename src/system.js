@@ -245,7 +245,8 @@ function finalizedImportCopy(input, options = {}) {
     fs.copyFileSync(input, output);
     const sourceCover = extractCover(output, tempDir);
     const fetched = fetchedMetadata(tempDir, options, !sourceCover);
-    const args = metadataArgs(output, options, !options.isbn);
+    if (fetched.opf) run("ebook-meta", [output, "--tags", ""]);
+    const args = metadataArgs(output, options, !fetched.opf);
     if (fetched.opf) args.push("--from-opf", fetched.opf);
     run("ebook-meta", args);
     polishImportCopy(output, tempDir, sourceCover || fetched.cover);

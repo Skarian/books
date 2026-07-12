@@ -81,11 +81,12 @@ test("ISBN imports use Calibre metadata directly and keep operational identifier
 
   const extract = calls.findIndex((call) => call.command === "ebook-meta" && call.args.includes("--get-cover"));
   const fetched = calls.findIndex((call) => call.command === "fetch-ebook-metadata");
+  const clearTags = calls.findIndex((call) => call.command === "ebook-meta" && call.args.includes("--tags"));
   const apply = calls.findIndex((call) => call.command === "ebook-meta" && call.args.includes("--from-opf"));
   const toOpf = calls.findIndex((call) => call.command === "ebook-meta" && call.args.includes("--to-opf"));
   const polish = calls.findIndex((call) => call.command === "ebook-polish");
-  assert.deepEqual([extract, fetched, apply, toOpf, polish].map((i) => i >= 0), [true, true, true, true, true]);
-  assert.ok(extract < fetched && fetched < apply && apply < toOpf && toOpf < polish);
+  assert.deepEqual([extract, fetched, clearTags, apply, toOpf, polish].map((i) => i >= 0), [true, true, true, true, true, true]);
+  assert.ok(extract < fetched && fetched < clearTags && clearTags < apply && apply < toOpf && toOpf < polish);
   assert.ok(calls[extract].args.includes("--disallow-rendered-cover"));
   assert.equal(calls[fetched].args.includes("--cover"), false);
   assert.ok(calls[fetched].args.includes("--isbn"));
@@ -133,7 +134,7 @@ test("import finalization fetches a cover only when the source has none", () => 
   assert.equal(polish.args[polish.args.indexOf("--cover") + 1], fetched.args[fetched.args.indexOf("--cover") + 1]);
 });
 
-test("import finalization falls back to local metadata when fetch has no result", () => {
+test("ISBN import finalization falls back to local metadata when fetch has no result", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-system-test-"));
   const calls = [];
   const { system, restore } = load(dir, (command, args) => {
@@ -148,7 +149,8 @@ test("import finalization falls back to local metadata when fetch has no result"
   try {
     const finalized = system._test.finalizedImportCopy(inputFile(dir), {
       title: "Power",
-      authors: ["Jeffrey Pfeffer"]
+      authors: ["Jeffrey Pfeffer"],
+      isbn: "9780062010612"
     });
     finalized.cleanup();
   } finally {
@@ -161,6 +163,7 @@ test("import finalization falls back to local metadata when fetch has no result"
   assert.ok(local);
   assert.ok(local.args.includes("--authors"));
   assert.ok(local.args.includes("--language"));
+  assert.ok(local.args.includes("9780062010612"));
   assert.equal(local.args.includes("--tags"), false);
   assert.equal(calls.some((call) => call.command === "ebook-polish"), false);
 });
