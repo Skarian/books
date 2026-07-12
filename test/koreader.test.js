@@ -112,7 +112,7 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(resumeHome, /modules = \{ "clock", "currently", "recent" \}/);
   assert.match(resumeHome, /modules = \{ "clock", "quote", "coverdeck" \}/);
   assert.match(resumeHome, /clock_scale"\] = 100/);
-  assert.match(resumeHome, /coverdeck_thumb_scale"\] = 110/);
+  assert.match(resumeHome, /coverdeck_thumb_scale"\] = 100/);
   assert.match(resumeHome, /coverdeck_show_finished"\] = false/);
   assert.match(resumeHome, /clock_enabled"\] = true/);
   assert.match(resumeHome, /clock_date"\] = false/);

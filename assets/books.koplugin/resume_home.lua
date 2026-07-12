@@ -70,7 +70,7 @@ function M.seedIfFresh(profile)
         settings[PFX .. "recent_enabled"] = false
         settings[PFX .. "coverdeck_enabled"] = true
         settings[PFX .. "coverdeck_scale"] = 100
-        settings[PFX .. "coverdeck_thumb_scale"] = 110
+        settings[PFX .. "coverdeck_thumb_scale"] = 100
         settings[PFX .. "coverdeck_item_label_scale"] = 100
         settings[PFX .. "coverdeck_source"] = "recent"
         settings[PFX .. "coverdeck_show_title"] = true
