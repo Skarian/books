@@ -72,7 +72,7 @@ function Books:_setupOPDS()
 end
 
 function Books:_setupSimpleUI()
-    if G_reader_settings:isTrue("books_simpleui_seeded") then return end
+    if G_reader_settings:isTrue("books_simpleui_seeded_v2") then return end
     local ok, QA = pcall(require, "sui_quickactions")
     local ok_config, Config = pcall(require, "sui_config")
     if not ok or not ok_config then return end
@@ -94,11 +94,21 @@ function Books:_setupSimpleUI()
     local members, found = QA.getQAFolderItems(group)
     for _, id in ipairs(members) do if id == action then found = true end end
     if not found then table.insert(members, action); QA.saveQAFolderItems(group, members) end
-    local tabs, defaults = Config.loadTabConfig(), true
-    for i, id in ipairs(Config.DEFAULT_TABS) do if tabs[i] ~= id then defaults = false end end
-    if #tabs ~= #Config.DEFAULT_TABS then defaults = false end
-    if defaults and not Config.isNavpagerEnabled() then table.insert(tabs, group); Config.saveTabConfig(tabs) end
-    G_reader_settings:saveSetting("books_simpleui_seeded", true):flush()
+    local tabs, old = Config.loadTabConfig(), { unpack(Config.DEFAULT_TABS) }
+    table.insert(old, group)
+    local function matches(wanted)
+        if #tabs ~= #wanted then return false end
+        for i, id in ipairs(wanted) do if tabs[i] ~= id then return false end end
+        return true
+    end
+    if matches(Config.DEFAULT_TABS) or matches(old) then
+        local moved, seen = { "sui_settings", "history", action, "power" }, {}
+        for _, id in ipairs(moved) do seen[id] = true end
+        for _, id in ipairs(members) do if not seen[id] then table.insert(moved, id) end end
+        QA.saveQAFolderItems(group, moved)
+        Config.saveTabConfig{ "homescreen", "home", group }
+    end
+    G_reader_settings:saveSetting("books_simpleui_seeded_v2", true):flush()
     local simpleui = self.ui._simpleui_plugin or self.ui.simpleui
     if simpleui and simpleui._rebuildAllNavbars then simpleui:_rebuildAllNavbars() end
 end

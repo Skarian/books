@@ -94,6 +94,9 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(booksPlugin, /dofile\(plugin_dir \.\. "config\.lua"\)/);
   assert.match(booksPlugin, /Synchronizing library…/);
   assert.match(booksPlugin, /Sync Books/);
+  assert.match(booksPlugin, /\{ "sui_settings", "history", action, "power" \}/);
+  assert.match(booksPlugin, /Config\.saveTabConfig\{ "homescreen", "home", group \}/);
+  assert.match(booksPlugin, /books_simpleui_seeded_v2/);
   assert.match(booksPlugin, /Automatic Book Updates/);
   assert.match(booksPlugin, /Books Library/);
   assert.match(booksPlugin, /choice1_text = _\("Keep"\)/);
