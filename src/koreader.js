@@ -16,6 +16,7 @@ const DICTIONARY_SHA256 = "2800f630d2975ea29a7b5763e7d79ed71dab9abcc6157534d75c7
 const DICTIONARY_DIR = path.join(config.configDir, "english-wiktionary-stardict");
 const AI_DICTIONARY_DIR = path.join(__dirname, "..", "assets", "books-ai-dictionary.koplugin");
 const BOOKS_PLUGIN_DIR = path.join(__dirname, "..", "assets", "books.koplugin");
+const LITERATA_DIR = path.join(__dirname, "..", "assets", "fonts", "literata");
 const KOBO_STYLE_SCREENSAVER_PATCH = path.join(__dirname, "..", "assets", "kobo-patches", "2-kobo-style-screensaver.lua");
 const BUNDLES = {
   "koreader-android-kindle.zip": "koreader",
@@ -47,6 +48,7 @@ function sha256(file) {
 function writeLegacyKosyncPatch(file, settings, network, token, koboStyle) {
   const readerDefaults = {
     copt_font_size: 30,
+    cre_font: "Literata",
     twelve_hour_clock: true
   };
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -249,6 +251,7 @@ function generate(row, name, options = {}) {
     stageSimpleUi(root, options.downloadSimpleUi);
     stageBooksPlugin(root, row, name === "koreader-kobo.zip" ? "kobo" : "android");
     stageDictionary(root, options.downloadDictionary);
+    fs.cpSync(LITERATA_DIR, path.join(root, "fonts"), { recursive: true });
     if (ai.enabled()) stageAiDictionary(root);
     system.run("zip", ["-qr", zipPath, rootName.split("/")[0]], { cwd: tempDir });
     return { path: zipPath, tempDir };

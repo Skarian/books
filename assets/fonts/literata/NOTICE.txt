@@ -1,0 +1,8 @@
+Literata 3.103
+
+Source: https://github.com/googlefonts/literata
+Commit: 0c2761b727a1b3a7cffd313c37f0f5163dfc7a63
+
+These are the unmodified official static Regular, Italic, Bold, and Bold
+Italic TrueType builds. Literata is distributed under the SIL Open Font
+License 1.1 included in OFL.txt.
