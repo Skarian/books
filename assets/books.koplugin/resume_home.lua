@@ -22,9 +22,12 @@ function M.seedIfFresh()
 
     local settings = {
         ["simpleui_layout"] = {
-            pages = { { id = 1, modules = { "currently", "recent" } } },
+            pages = { { id = 1, modules = { "clock", "currently", "recent" } } },
         },
         [PFX .. "quote_enabled"] = false,
+        [PFX .. "clock_enabled"] = true,
+        [PFX .. "clock_date"] = false,
+        [PFX .. "clock_battery"] = false,
         [PFX .. "currently_enabled"] = true,
         [PFX .. "recent_enabled"] = true,
 
@@ -69,7 +72,9 @@ function M.applyRecentTitles()
     local CenterContainer = require("ui/widget/container/centercontainer")
     local FrameContainer = require("ui/widget/container/framecontainer")
     local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local HorizontalSpan = require("ui/widget/horizontalspan")
     local InputContainer = require("ui/widget/container/inputcontainer")
+    local LeftContainer = require("ui/widget/container/leftcontainer")
     local TextBoxWidget = require("ui/widget/textboxwidget")
     local VerticalGroup = require("ui/widget/verticalgroup")
     local Config = require("sui_config")
@@ -79,6 +84,30 @@ function M.applyRecentTitles()
     local Screen = Device.screen
     local PAD = UI.PAD
     local _ = require("sui_i18n").translate
+
+    -- The 600x800 compact profile cannot fit SimpleUI's full 70-unit clock,
+    -- featured block, Recent title/percentage, and navbar simultaneously.
+    -- Scale only the two tall elements on that profile; Android keeps the
+    -- normal module and featured-cover sizes.
+    if not Config._books_resume_compact_scale_applied then
+        local getModuleScale = Config.getModuleScale
+        local getThumbScale = Config.getThumbScale
+        Config.getModuleScale = function(mod_id, pfx)
+            local scale = getModuleScale(mod_id, pfx)
+            if Screen:getWidth() < 800 and mod_id == "clock" then
+                return scale * 0.40
+            end
+            return scale
+        end
+        Config.getThumbScale = function(mod_id, pfx)
+            local scale = getThumbScale(mod_id, pfx)
+            if Screen:getWidth() < 800 and mod_id == "currently" then
+                return scale * 0.80
+            end
+            return scale
+        end
+        Config._books_resume_compact_scale_applied = true
+    end
 
     -- Keep the two book sections on one shared rhythm. SimpleUI's section
     -- labels all draw their lower spacing from LABEL_PAD_BOT, while module
@@ -98,9 +127,11 @@ function M.applyRecentTitles()
     local function layoutProfile()
         local width, height = Screen:getWidth(), Screen:getHeight()
         if width < 800 then
-            return 3, 1, 0, 3, Screen:scaleBySize(18)
+            return 3, 0.85, 0, 3, Screen:scaleBySize(18)
         elseif height > width then
-            return 4, 2, 0, 2, Screen:scaleBySize(48)
+            -- Android uses two rows of three: left, center, right. This uses
+            -- the available width without shrinking the titled covers.
+            return 6, 1.4, 0, 3, Screen:scaleBySize(48)
         end
         return 5, 1, 0, 5, Screen:scaleBySize(18)
     end
@@ -133,6 +164,10 @@ function M.applyRecentTitles()
             d.RECENT_H = math.floor(d.RECENT_H * cover_scale)
         end
         local title_fs = math.max(9, math.floor(SUIStyle.FS_DETAIL * scale * label_scale))
+        local screen_w, screen_h = Screen:getWidth(), Screen:getHeight()
+        if screen_w >= 800 and screen_h > screen_w then
+            title_fs = math.max(9, math.floor(title_fs * 0.90))
+        end
         local pct_fs = math.max(8, math.floor(SUIStyle.FS_DETAIL * scale * label_scale))
         local title_h = math.max(24,
             math.floor(Screen:scaleBySize(38) * scale * label_scale))
@@ -148,8 +183,15 @@ function M.applyRecentTitles()
         local d, title_fs, pct_fs, title_h, gap_y, top_gap = dimensions(ctx)
         local inner_w = w - PAD * 2
         local _, _, _, columns, row_gap = layoutProfile()
-        columns = math.min(columns, #books)
         local slot_w = math.floor(inner_w / columns)
+        -- Treat the cover, title, and percentage as one centered card. Cards
+        -- are narrower than their grid slot so the first/last cards can anchor
+        -- to the module edges while every element retains one centerline.
+        local card_w = math.min(slot_w,
+            d.RECENT_W + Screen:scaleBySize(48))
+        local column_gap = columns > 1
+            and math.max(0, math.floor((inner_w - columns * card_w) / (columns - 1)))
+            or 0
         local title_face = Font:getFace(SUIStyle.FACE_REGULAR, title_fs)
         local pct_face = Font:getFace(SUIStyle.FACE_REGULAR, pct_fs)
         local fg = SUIStyle.getThemeColor("fg") or Blitbuffer.COLOR_BLACK
@@ -168,7 +210,7 @@ function M.applyRecentTitles()
                     text = title or "",
                     face = title_face,
                     bold = true,
-                    width = slot_w,
+                    width = card_w,
                     height = height,
                     height_overflow_show_ellipsis = height ~= nil,
                     line_height = 0.18,
@@ -185,7 +227,7 @@ function M.applyRecentTitles()
                 title_widget = makeTitle(title_h)
             end
             return BottomContainer:new{
-                dimen = Geom:new{ w = slot_w, h = title_h },
+                dimen = Geom:new{ w = card_w, h = title_h },
                 title_widget,
             }
         end
@@ -198,7 +240,7 @@ function M.applyRecentTitles()
                 local cover = SH.getBookCover(fp, d.RECENT_W, d.RECENT_H, nil, 0.10)
                     or SH.coverPlaceholder(bd.title, bd.authors, d.RECENT_W, d.RECENT_H)
                 local cover_box = CenterContainer:new{
-                    dimen = Geom:new{ w = slot_w, h = d.RECENT_H },
+                    dimen = Geom:new{ w = card_w, h = d.RECENT_H },
                     cover,
                 }
                 local cell = VerticalGroup:new{
@@ -209,7 +251,7 @@ function M.applyRecentTitles()
                 }
                 if show_bar then
                     cell[#cell + 1] = SH.vspan(gap_y, ctx.vspan_pool)
-                    cell[#cell + 1] = UI.progressBar(slot_w, bd.percent, d.RB_BAR_H)
+                    cell[#cell + 1] = UI.progressBar(card_w, bd.percent, d.RB_BAR_H)
                 end
                 if show_pct then
                     cell[#cell + 1] = SH.vspan(gap_y, ctx.vspan_pool)
@@ -218,13 +260,13 @@ function M.applyRecentTitles()
                         face = pct_face,
                         bold = true,
                         fgcolor = secondary,
-                        width = slot_w,
+                        width = card_w,
                         alignment = "center",
                     }
                 end
 
                 local tappable = InputContainer:new{
-                    dimen = Geom:new{ w = slot_w, h = cell_h },
+                    dimen = Geom:new{ w = card_w, h = cell_h },
                     [1] = cell,
                     _fp = fp,
                     _open_fn = ctx.open_fn,
@@ -237,6 +279,9 @@ function M.applyRecentTitles()
                     return true
                 end
 
+                if i > row_start then
+                    row[#row + 1] = HorizontalSpan:new{ width = column_gap }
+                end
                 row[#row + 1] = tappable
                 cover_slots[#cover_slots + 1] = {
                     container = cover_box, idx = 1, fp = fp,
@@ -244,7 +289,7 @@ function M.applyRecentTitles()
                 }
             end
             if #rows > 0 then rows[#rows + 1] = SH.vspan(row_gap, ctx.vspan_pool) end
-            rows[#rows + 1] = CenterContainer:new{
+            rows[#rows + 1] = LeftContainer:new{
                 dimen = Geom:new{ w = inner_w, h = cell_h },
                 row,
             }
