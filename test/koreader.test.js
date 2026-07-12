@@ -206,7 +206,7 @@ test("KOReader starter bundles include account settings and SimpleUI paths", () 
   assert.match(koboPatch, /"kobo_style_show_progress"\] = true/);
   assert.match(koboPatch, /"kobo_style_show_time_left"\] = true/);
   assert.match(koboPatch, /"kobo_style_show_today_time"\] = false/);
-  assert.match(koboPatch, /"kobo_style_show_pages"\] = false/);
+  assert.match(koboPatch, /"kobo_style_show_pages"\] = true/);
   assert.match(koboPatch, /"kobo_style_show_quote"\] = false/);
   assert.doesNotMatch(patch, /books_kobo_style_screensaver_v1|kobo_style_/);
   const koboStylePatch = zipRead(koboBundle.path, ".adds/koreader/patches/2-kobo-style-screensaver.lua");

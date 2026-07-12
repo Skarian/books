@@ -238,7 +238,7 @@ function generate(row, name, options = {}) {
       kobo_style_show_time_left: true,
       kobo_style_show_today_time: false,
       kobo_style_show_cover: true,
-      kobo_style_show_pages: false,
+      kobo_style_show_pages: true,
       kobo_style_show_quote: false
     };
   }
