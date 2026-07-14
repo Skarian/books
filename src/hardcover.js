@@ -107,6 +107,96 @@ function primaryAuthor(book) {
   return "";
 }
 
+async function searchBooks(token, query, options = {}) {
+  const text = String(query || "").trim();
+  const requestedLimit = Number(options.limit);
+  const limit = Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, 50) : 50;
+  if (!text || text.length > 160) throw new Error("Search query must be between 1 and 160 characters.");
+  const perPage = Math.min(limit, 25);
+  const ids = [];
+  const seen = new Set();
+  for (let page = 1; ids.length < limit; page += 1) {
+    const search = await graphql(token, `
+      query SearchBooks($query: String!, $perPage: Int!, $page: Int!) {
+        search(query: $query, query_type: "Book", per_page: $perPage, page: $page) { ids }
+      }
+    `, { query: text, perPage, page });
+    const pageIds = (search.search?.ids || []).map(Number)
+      .filter((id) => Number.isSafeInteger(id) && id > 0);
+    for (const id of pageIds) {
+      if (!seen.has(id)) { seen.add(id); ids.push(id); }
+      if (ids.length === limit) break;
+    }
+    if (pageIds.length < perPage) break;
+  }
+  if (!ids.length) return [];
+  const details = await graphql(token, `
+    query SearchBookDetails($ids: [Int!]!, $limit: Int!) {
+      books(where: {id: {_in: $ids}}, limit: $limit) {
+        id
+        title
+        release_year
+        users_count
+        image { url width height }
+        contributions { author { name } }
+      }
+    }
+  `, { ids, limit });
+  const byId = new Map((details.books || []).map((book) => [Number(book.id), book]));
+  return ids.map((id) => byId.get(id)).filter(Boolean).map((book) => ({
+    id: Number(book.id),
+    title: String(book.title || "").trim(),
+    author: primaryAuthor(book),
+    year: book.release_year != null && Number.isSafeInteger(Number(book.release_year)) ? Number(book.release_year) : null,
+    users_count: Number.isSafeInteger(Number(book.users_count)) && Number(book.users_count) >= 0 ? Number(book.users_count) : 0,
+    cover_url: /^https:\/\//.test(String(book.image?.url || "")) ? String(book.image.url) : null
+  }));
+}
+
+async function requestBook(token, bookId) {
+  const id = Number(bookId);
+  if (!Number.isSafeInteger(id) || id < 1) throw new Error("book_id must be a positive integer.");
+  const existing = await graphql(token, `
+    query RequestedBookStatus($bookId: Int!) {
+      me {
+        user_books(where: {book_id: {_eq: $bookId}}, limit: 1) {
+          id
+          book_id
+          status_id
+          book { title contributions { author { name } } }
+        }
+      }
+    }
+  `, { bookId: id });
+  const userBook = existing.me?.[0]?.user_books?.[0];
+  if (userBook) {
+    if (Number(userBook.status_id) !== WANT_TO_READ_STATUS) {
+      const error = new Error("Book is already in the user's Hardcover library.");
+      error.code = "already_in_library";
+      error.statusId = Number(userBook.status_id);
+      throw error;
+    }
+    return {
+      status: "queued",
+      existing: true,
+      book: { id, title: userBook.book?.title || "", author: primaryAuthor(userBook.book || {}) }
+    };
+  }
+  const inserted = await graphql(token, `
+    mutation RequestBook($object: UserBookCreateInput!) {
+      insert_user_book(object: $object) {
+        error
+        user_book { book_id book { title contributions { author { name } } } }
+      }
+    }
+  `, { object: { book_id: id, status_id: WANT_TO_READ_STATUS } });
+  if (inserted.insert_user_book?.error || !inserted.insert_user_book?.user_book) {
+    throw new Error(inserted.insert_user_book?.error || "Hardcover did not add the requested book.");
+  }
+  const book = inserted.insert_user_book.user_book.book || {};
+  return { status: "queued", existing: false, book: { id, title: book.title || "", author: primaryAuthor(book) } };
+}
+
 function safeFilename(value) {
   return (String(value).replace(/[^A-Za-z0-9._ -]+/g, "").replace(/\s+/g, " ").trim().slice(0, 120) || "book") + ".epub";
 }
@@ -568,6 +658,8 @@ async function sync(options = {}) {
 module.exports = {
   normalizeToken,
   verifyToken,
+  searchBooks,
+  requestBook,
   sync,
   _test: {
     findCandidate,

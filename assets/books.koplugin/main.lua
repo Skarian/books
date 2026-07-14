@@ -26,6 +26,7 @@ end
 local function notice(text) UIManager:show(InfoMessage:new{ text = text, timeout = 3 }) end
 
 function Books:init()
+    self.ui.menu:registerToMainMenu(self)
     self:_setupCoverBrowser()
     UIManager:nextTick(function()
         self:_setupOPDS()
@@ -112,17 +113,18 @@ function Books:_setupSimpleUI()
         local scaled, scale_err = pcall(ResumeHome.applyAppsPopupScale)
         if not scaled then logger.warn("Books Apps popup scaling failed:", scale_err) end
     end
-    if G_reader_settings:isTrue("books_simpleui_seeded_v2") then
+    if G_reader_settings:isTrue("books_simpleui_seeded_v3") then
         if ok_home then
             local applied, apply_err = pcall(ResumeHome.applyRecentTitles, config.home_profile)
             if not applied then logger.warn("Books recent-title renderer failed:", apply_err) end
         end
         return
     end
-    local list, action, group = QA.getCustomQAList()
+    local list, sync_action, request_action, group = QA.getCustomQAList()
     for _, id in ipairs(list) do
         local item = QA.getCustomQAConfig(id)
-        if item.plugin_key == "books" and item.plugin_method == "updateBooks" then action = id end
+        if item.plugin_key == "books" and item.plugin_method == "updateBooks" then sync_action = id end
+        if item.plugin_key == "books" and item.plugin_method == "requestBook" then request_action = id end
         if item.qa_folder and item.label == "Apps" then group = id end
     end
     local function add(label, icon, key, method, folder)
@@ -132,11 +134,17 @@ function Books:_setupSimpleUI()
         QA.saveCustomQAList(list)
         return id
     end
-    action = action or add("Sync Books", Config.CUSTOM_PLUGIN_ICON, "books", "updateBooks")
+    sync_action = sync_action or add("Sync Books", Config.CUSTOM_PLUGIN_ICON, "books", "updateBooks")
+    request_action = request_action or add("Requests", Config.ICON.ko_search, "books", "requestBook")
     group = group or add("Apps", Config.CUSTOM_GROUP_ICON, nil, nil, true)
-    local members, found = QA.getQAFolderItems(group)
-    for _, id in ipairs(members) do if id == action then found = true end end
-    if not found then table.insert(members, action); QA.saveQAFolderItems(group, members) end
+    local members, found_sync, found_request = QA.getQAFolderItems(group)
+    for _, id in ipairs(members) do
+        if id == sync_action then found_sync = true end
+        if id == request_action then found_request = true end
+    end
+    if not found_sync then table.insert(members, sync_action) end
+    if not found_request then table.insert(members, request_action) end
+    if not found_sync or not found_request then QA.saveQAFolderItems(group, members) end
     local tabs, old = Config.loadTabConfig(), { unpack(Config.DEFAULT_TABS) }
     table.insert(old, group)
     local function matches(wanted)
@@ -145,13 +153,13 @@ function Books:_setupSimpleUI()
         return true
     end
     if matches(Config.DEFAULT_TABS) or matches(old) then
-        local moved, seen = { "sui_settings", "history", action, "power" }, {}
+        local moved, seen = { "sui_settings", "history", sync_action, request_action, "power" }, {}
         for _, id in ipairs(moved) do seen[id] = true end
         for _, id in ipairs(members) do if not seen[id] then table.insert(moved, id) end end
         QA.saveQAFolderItems(group, moved)
         Config.saveTabConfig{ "homescreen", "home", group }
     end
-    G_reader_settings:saveSetting("books_simpleui_seeded_v2", true):flush()
+    G_reader_settings:saveSetting("books_simpleui_seeded_v3", true):flush()
     if ok_home then
         local applied, apply_err = pcall(ResumeHome.applyRecentTitles, config.home_profile)
         if not applied then logger.warn("Books recent-title renderer failed:", apply_err) end
@@ -288,6 +296,24 @@ function Books:updateBooks()
             if not ok then logger.warn("Books update failed:", err); notice(_("Library update failed!")) end
         end)
     end)
+end
+
+function Books:requestBook()
+    local ok, Requests = pcall(dofile, plugin_dir .. "requests.lua")
+    if not ok then logger.warn("Books requests unavailable:", Requests); notice(_("Error: Book requests unavailable")); return end
+    Requests.show{ config = config }
+end
+
+function Books:addToMainMenu(menu_items)
+    if self.ui.document then return end
+    menu_items.books = {
+        text = _("Books"),
+        sorting_hint = "tools",
+        sub_item_table = {
+            { text = _("Requests"), callback = function() self:requestBook() end },
+            { text = _("Sync Books"), callback = function() self:updateBooks() end },
+        },
+    }
 end
 
 return Books

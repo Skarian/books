@@ -1,12 +1,12 @@
 local DataStorage = require("datastorage")
-local InfoMessage = require("ui/widget/infomessage")
 local JSON = require("json")
 local LuaSettings = require("luasettings")
 local NetworkMgr = require("ui/network/manager")
 local Trapper = require("ui/trapper")
-local UIManager = require("ui/uimanager")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local _ = require("gettext")
+local plugin_dir = debug.getinfo(1, "S").source:match("^@(.+/)[^/]+$") or "./"
+local Status = dofile(plugin_dir .. "../books_status.lua")
 
 local BooksAIDictionary = InputContainer:new{
     name = "books_ai_dictionary",
@@ -42,9 +42,7 @@ local function htmlDefinition(entry)
     return table.concat(lines, "<br/>")
 end
 
-local function notify(text)
-    UIManager:show(InfoMessage:new{ text = text, timeout = 3 })
-end
+local notify = Status.notice
 
 local function request(endpoint, username, password, body)
     local http = require("socket.http")
@@ -225,15 +223,9 @@ function BooksAIDictionary:startLookup(payload)
     local endpoint, username, password = self:booksServer()
     if not endpoint then return notify(_("Books OPDS account was not found.")) end
     local body = self:body(payload)
-    local info = InfoMessage:new{ text = _("Looking up AI Dictionary...") }
-    UIManager:show(info)
-    UIManager:forceRePaint()
-    local completed, ok, definition = Trapper:dismissableRunInSubprocess(function()
+    local completed, ok, definition = Status.run(_("Looking up AI Dictionary…"), function()
         return request(endpoint, username, password, body)
-    end, info)
-    if completed then
-        UIManager:close(info)
-    end
+    end)
     if not completed then return end
     if not ok then return notify(definition) end
     self.ui.dictionary:showDict(payload.selection, {

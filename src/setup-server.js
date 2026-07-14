@@ -5,6 +5,7 @@ const koreader = require("./koreader");
 const readest = require("./readest");
 const state = require("./state");
 const ai = require("./ai");
+const hardcover = require("./hardcover");
 
 function unauthorized(res) {
   res.writeHead(401, {
@@ -87,6 +88,44 @@ async function aiLookup(req, res, options) {
   }
 }
 
+function json(res, status, body, headers = {}) {
+  res.writeHead(status, {
+    "Cache-Control": "private, no-store",
+    "Content-Type": "application/json; charset=utf-8",
+    ...headers
+  });
+  res.end(`${JSON.stringify(body)}\n`);
+}
+
+async function requestsApi(req, res, options, action) {
+  const row = authenticatedAccount(req);
+  if (!row) return json(res, 401, { error: "unauthorized" }, { "WWW-Authenticate": 'Basic realm="Books requests"' });
+  if (!row.hardcover_token) return json(res, 409, { error: "hardcover_not_configured" });
+  try {
+    const input = await readJson(req);
+    if (action === "search") {
+      const results = await (options.searchBooks || hardcover.searchBooks)(row.hardcover_token, input.query);
+      return json(res, 200, { results });
+    }
+    const result = await (options.requestBook || hardcover.requestBook)(row.hardcover_token, input.book_id);
+    return json(res, 200, result);
+  } catch (error) {
+    if (error.code === "already_in_library") {
+      const statuses = { 1: "want_to_read", 2: "currently_reading", 3: "read", 5: "did_not_finish" };
+      return json(res, 409, {
+        error: error.code,
+        book_status: statuses[error.statusId] || "unknown",
+        status_id: error.statusId
+      });
+    }
+    if (error instanceof SyntaxError || error.message === "request too large"
+        || /^(Search query|book_id)/.test(error.message)) {
+      return json(res, 400, { error: "invalid_request" });
+    }
+    return json(res, 502, { error: "hardcover_unavailable" });
+  }
+}
+
 function page(title, body) {
   return `<!doctype html>
 <html>
@@ -132,6 +171,14 @@ function crosspointPage() {
 }
 
 function serve(req, res, options = {}) {
+  if (req.method === "POST" && isPage(req, ["/requests/search"])) {
+    requestsApi(req, res, options, "search");
+    return;
+  }
+  if (req.method === "POST" && isPage(req, ["/requests/submit"])) {
+    requestsApi(req, res, options, "submit");
+    return;
+  }
   if (req.method === "POST" && isPage(req, ["/ai-dictionary/lookup"])) {
     aiLookup(req, res, options);
     return;

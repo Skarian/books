@@ -16,6 +16,7 @@ const DICTIONARY_SHA256 = "2800f630d2975ea29a7b5763e7d79ed71dab9abcc6157534d75c7
 const DICTIONARY_DIR = path.join(config.configDir, "english-wiktionary-stardict");
 const AI_DICTIONARY_DIR = path.join(__dirname, "..", "assets", "books-ai-dictionary.koplugin");
 const BOOKS_PLUGIN_DIR = path.join(__dirname, "..", "assets", "books.koplugin");
+const BOOKS_STATUS = path.join(__dirname, "..", "assets", "books_status.lua");
 const LITERATA_DIR = path.join(__dirname, "..", "assets", "fonts", "literata");
 const KOBO_STYLE_SCREENSAVER_PATCH = path.join(__dirname, "..", "assets", "kobo-patches", "2-kobo-style-screensaver.lua");
 const BUNDLES = {
@@ -201,9 +202,11 @@ function stageBooksPlugin(root, row, homeProfile) {
   const target = path.join(root, "plugins", "books.koplugin");
   fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   fs.cpSync(BOOKS_PLUGIN_DIR, target, { recursive: true });
+  fs.copyFileSync(BOOKS_STATUS, path.join(root, "plugins", "books_status.lua"));
   writeLua(path.join(target, "config.lua"), {
     browse_url: `https://${config.publicHost}/catalog`,
     updates_url: `https://${config.publicHost}/catalog/navcatalog/4f6e6577657374?library_id=library`,
+    requests_url: `https://${config.publicHost}/requests`,
     home_profile: homeProfile,
     username: row.slug,
     password: row.books_password

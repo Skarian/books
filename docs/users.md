@@ -47,7 +47,7 @@ Keep `.env`, `secrets/annas_secret_key`, `data/config/secrets.json` (Calibre adm
 
 ## Reader setup links
 
-KOReader setup ZIPs are generated on demand when a user opens the setup page and signs in with their Books username and password. The bundle downloads pinned SimpleUI `2.1` into `data/config/simpleui-2.1.koplugin` the first time it is needed; later requests reuse that cached copy. On unmodified SimpleUI layouts, its Books plugin arranges **Home · Library · Apps**, with **Settings · History · Sync Books · Power** inside Apps, without replacing unrelated OPDS settings. On first Books setup it selects KOReader's **Mosaic with cover images** Library mode when CoverBrowser is still at its fresh or untouched stock layout; customized layouts and later user changes are preserved.
+KOReader setup ZIPs are generated on demand when a user opens the setup page and signs in with their Books username and password. The bundle downloads pinned SimpleUI `2.1` into `data/config/simpleui-2.1.koplugin` the first time it is needed; later requests reuse that cached copy. On unmodified SimpleUI layouts, its Books plugin arranges **Home · Library · Apps**, with **Settings · History · Sync Books · Requests · Power** inside Apps, without replacing unrelated OPDS settings. The Books plugin also exposes native **Requests** and **Sync Books** menu entries; the request workflow itself uses only native KOReader widgets and remains available if SimpleUI is removed. Requests searches Hardcover through the server using the same Books login; the reader never receives the user's Hardcover token. On first Books setup it selects KOReader's **Mosaic with cover images** Library mode when CoverBrowser is still at its fresh or untouched stock layout; customized layouts and later user changes are preserved.
 
 Readest and CrossPoint setup ZIPs are also generated on demand and contain that user's catalog and KOSync settings.
 
@@ -84,7 +84,7 @@ Repeat `--user` to grant the same import to more than one user. Pass multiple pa
 
 ## Hardcover intake
 
-Hardcover Want to Read is the intake queue. When a Hardcover API token is configured for a user, the worker checks their Want to Read list every five minutes and imports or grants a matching English EPUB to that user when one is found.
+Hardcover Want to Read is the intake queue. When a Hardcover API token is configured for a user, the worker checks their Want to Read list every minute and imports or grants a matching English EPUB to that user when one is found.
 
 ### Connect a Hardcover account
 

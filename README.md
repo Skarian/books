@@ -26,7 +26,7 @@ See [docs/device-setup.md](docs/device-setup.md) for per-app configuration steps
 
 The Calibre database is shared for storage and metadata, but catalog visibility is per user. Each book has one or more owning user slugs; Calibre exposes only matching books to each login. Reading progress is private: each user gets one Books login, and their sync state is stored separately under that login. KOSync is last-write-wins per login, so each user must use their own credentials.
 
-Hardcover Want to Read works as a request queue when a Hardcover API token is configured for a user. A background worker checks the list every five minutes and imports or grants a matching English EPUB to that user when one is found.
+Hardcover Want to Read works as a request queue when a Hardcover API token is configured for a user. A background worker checks the list every minute and imports or grants a matching English EPUB to that user when one is found.
 
 ## Get started
 

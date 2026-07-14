@@ -23,7 +23,7 @@ Users read through hosted Readest, OPDS-capable apps, KOReader, or CrossPoint. T
 | `calibre` | `books-runtime` | `calibre-server` with Basic auth, OPDS, and downloads |
 | `kosync` | `koreader/kosync` (pinned by digest) | KOReader Sync Server backed by Redis |
 | `setup` | `books-runtime` | Credential-gated KOReader setup ZIP downloads |
-| `worker` | `books-runtime` | Runs `hardcover sync` every five minutes |
+| `worker` | `books-runtime` | Runs `hardcover sync` every minute |
 | `admin` | `books-runtime` | One-shot CLI container for owner commands |
 
 `calibre`, `setup`, `worker`, and `admin` all use the `books-runtime` image built from the repo. The `setup` service and `worker` restart continuously. The `admin` container uses the `admin` Compose profile and only runs via `docker compose run` — it does not start with `docker compose up`.
@@ -45,6 +45,8 @@ https://books.example.com
   /crosspoint           → Books setup service page
   /setup/<zip>          → Books setup service ZIP downloads
   /ai-dictionary/lookup → Optional AI dictionary lookup proxy
+  /requests/search      → Search Hardcover using the authenticated user's stored token
+  /requests/submit      → Add a Hardcover book to the user's Want to Read queue
   /library              → 302 redirect to https://web.readest.com/
   /healthz              → nginx returns "ok" directly, no upstream
   /kosync/users/create  → 404 (registration disabled; accounts are managed by the CLI)
@@ -61,6 +63,20 @@ nginx uses Docker's internal DNS resolver (`127.0.0.11`) with `valid=30s` so it 
 **Reader setup (`/koreader`, `/readest`, `/crosspoint`, `/setup/...`):** HTTP Basic auth against `state.json`. Setup pages and ZIP downloads use the authenticated user, and only known setup ZIP filenames are served.
 
 **AI dictionary (`/ai-dictionary/lookup`):** Disabled unless `BOOKS_AI_PROVIDER` is set to `codex` or `openai`. Requests use the existing Books account Basic auth; provider credentials stay on the server.
+
+**Book requests (`/requests/search`, `/requests/submit`):** Requests use the existing Books account Basic auth. The setup service resolves the account and calls Hardcover with the token stored in `state.json`; the token is never sent to the reader.
+
+Both request routes accept JSON and return JSON with `Cache-Control: private, no-store`:
+
+```text
+POST /requests/search  { "query": "Dune" }
+  200 { "results": [{ "id": 312460, "title": "Dune", "author": "Frank Herbert", "year": 1965, "users_count": 13290 }] }
+
+POST /requests/submit  { "book_id": 312460 }
+  200 { "status": "queued", "existing": false, "book": { "id": 312460, "title": "Dune", "author": "Frank Herbert" } }
+```
+
+Errors have a stable `error` code. The request API returns `401 unauthorized`, `400 invalid_request`, `409 hardcover_not_configured`, `409 already_in_library`, or `502 hardcover_unavailable`. An `already_in_library` response also includes Hardcover's numeric `status_id` and a `book_status` name.
 
 Each user gets one Books login — username and diceware passphrase — that works for both systems. The `reconcile` command writes that login into Calibre and KOSync whenever an account is created, restored, or pushed.
 
@@ -101,7 +117,7 @@ The stored EPUB in the Calibre library is the sync artifact. New imports are fin
 The `worker` container runs a loop:
 
 ```bash
-while true; do node src/cli.js hardcover sync; sleep 300; done
+while true; do node src/cli.js hardcover sync; sleep 60; done
 ```
 
 Each `hardcover sync` pass:

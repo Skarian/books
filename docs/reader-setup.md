@@ -76,7 +76,9 @@ KOSync tracks reading position only. Book files, bookmarks, highlights, notes, r
 
 ## Requesting books
 
-If your owner connected your Hardcover account, add books to **Want to Read** in Hardcover. The server checks that list every five minutes and imports a matching English EPUB when it finds one.
+If your owner connected your Hardcover account, open **Apps → Requests** in the bundled SimpleUI layout, or use KOReader's native **Books → Requests** plugin menu. Search by title or author, choose the matching cover, and tap **Request**. Results show the release year beside the title and a star with the number of Hardcover users at the right to help distinguish editions. Up to 50 ranked results are available. The request dialogs use native KOReader widgets and continue to work without SimpleUI. You can also add books to **Want to Read** directly in Hardcover.
+
+The server checks Want to Read every minute. Use **Apps → Sync Books**, or native **Books → Sync Books**, later to download a matched English EPUB into KOReader.
 
 ---
 

@@ -75,7 +75,7 @@ services:
       - no-new-privileges:true
     env_file:
       - .env
-    command: ["sh", "-lc", "while true; do node src/cli.js hardcover sync; sleep 300; done"]
+    command: ["sh", "-lc", "while true; do node src/cli.js hardcover sync; sleep 60; done"]
     volumes:
       - ${BOOKS_HOST_DATA_DIR:-./data}:/srv/books
     secrets:

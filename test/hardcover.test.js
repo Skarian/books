@@ -291,6 +291,85 @@ test("Hardcover GraphQL retries transient plain-text failures", async () => {
   }
 });
 
+test("Hardcover search returns compact results in search rank order", async () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const bodies = [];
+  const responses = [
+    { data: { search: { ids: [42, 7] } } },
+    { data: { books: [
+      { id: 7, title: "Second", release_year: null, users_count: 4, image: null, contributions: [{ author: { name: "Writer Two" } }] },
+      { id: 42, title: "First", release_year: 2024, users_count: 1200,
+        image: { url: "https://assets.hardcover.app/first.jpg", width: 600, height: 900 }, contributions: [
+        { author: { name: "Writer One" } }, { author: { name: "An Editor" } }
+      ] }
+    ] } }
+  ];
+  const results = await withFetch(async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return { ok: true, status: 200, text: async () => JSON.stringify(responses.shift()) };
+  }, () => hardcover.searchBooks("token", " ranked books "));
+  assert.deepEqual(results, [
+    { id: 42, title: "First", author: "Writer One", year: 2024, users_count: 1200, cover_url: "https://assets.hardcover.app/first.jpg" },
+    { id: 7, title: "Second", author: "Writer Two", year: null, users_count: 4, cover_url: null }
+  ]);
+  assert.deepEqual(bodies[0].variables, { query: "ranked books", perPage: 25, page: 1 });
+  assert.deepEqual(bodies[1].variables, { ids: [42, 7], limit: 50 });
+});
+
+test("Hardcover search follows a second API page up to the 50-result cap", async () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const first = Array.from({ length: 25 }, (_, index) => index + 1);
+  const ids = [...first, 26];
+  const bodies = [];
+  const responses = [
+    { data: { search: { ids: first } } },
+    { data: { search: { ids: [25, 26] } } },
+    { data: { books: ids.map((id) => ({
+      id, title: `Book ${id}`, release_year: 2000 + id, users_count: id,
+      image: null, contributions: []
+    })) } }
+  ];
+  const results = await withFetch(async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return { ok: true, status: 200, text: async () => JSON.stringify(responses.shift()) };
+  }, () => hardcover.searchBooks("token", "many books"));
+  assert.equal(results.length, 26);
+  assert.deepEqual(results.map((book) => book.id), ids);
+  assert.deepEqual(bodies[1].variables, { query: "many books", perPage: 25, page: 2 });
+  assert.deepEqual(bodies[2].variables, { ids, limit: 50 });
+});
+
+test("Hardcover request is idempotent for existing Want to Read books", async () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  let calls = 0;
+  const result = await withFetch(async () => {
+    calls += 1;
+    return { ok: true, status: 200, text: async () => JSON.stringify({ data: { me: [{ user_books: [{
+      id: 9, book_id: 42, status_id: 1,
+      book: { title: "Queued", contributions: [{ author: { name: "An Author" } }] }
+    }] }] } }) };
+  }, () => hardcover.requestBook("token", 42));
+  assert.deepEqual(result, { status: "queued", existing: true, book: { id: 42, title: "Queued", author: "An Author" } });
+  assert.equal(calls, 1);
+});
+
+test("Hardcover request inserts a new Want to Read book", async () => {
+  const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
+  const bodies = [];
+  const responses = [
+    { data: { me: [{ user_books: [] }] } },
+    { data: { insert_user_book: { error: null, user_book: {
+      book_id: 42, book: { title: "Requested", contributions: [{ author: { name: "An Author" } }] }
+    } } } }
+  ];
+  const result = await withFetch(async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return { ok: true, status: 200, text: async () => JSON.stringify(responses.shift()) };
+  }, () => hardcover.requestBook("token", 42));
+  assert.deepEqual(result, { status: "queued", existing: false, book: { id: 42, title: "Requested", author: "An Author" } });
+  assert.deepEqual(bodies[1].variables, { object: { book_id: 42, status_id: 1 } });
+});
+
 test("Hardcover GraphQL retries transient GraphQL errors", async () => {
   const { hardcover } = load(fs.mkdtempSync(path.join(os.tmpdir(), "books-hardcover-test-")));
   let calls = 0;
