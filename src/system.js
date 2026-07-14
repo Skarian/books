@@ -202,6 +202,27 @@ function nonemptyFile(file) {
   return file && fs.existsSync(file) && fs.statSync(file).size;
 }
 
+const COVER_NORMALIZER = [
+  "import shutil, sys",
+  "from PIL import Image",
+  "source, stem = sys.argv[1:3]",
+  "with Image.open(source) as image:",
+  "    target = stem + ('.jpg' if image.format == 'JPEG' else '.png' if image.format == 'PNG' else '')",
+  "    if not target[-4:] in ('.jpg', '.png'): raise ValueError('Cover must be JPEG or PNG')",
+  "    if image.format == 'JPEG' and (image.info.get('progressive') or image.info.get('progression')):",
+  "        image.save(target, 'JPEG', quality='keep', subsampling='keep', progressive=False)",
+  "    else: shutil.copyfile(source, target)",
+  "print(target)"
+].join("\n");
+
+function normalizeCover(file, tempDir) {
+  if (!nonemptyFile(file)) return null;
+  const result = run("calibre-debug", ["-c", COVER_NORMALIZER, file, path.join(tempDir, "normalized-cover")]);
+  const normalized = String(result.stdout || "").trim().split(/\r?\n/).at(-1);
+  if (!nonemptyFile(normalized)) throw new Error("Calibre did not produce a normalized cover.");
+  return normalized;
+}
+
 function extractCover(file, tempDir) {
   const cover = path.join(tempDir, "source-cover");
   const result = run("ebook-meta", [file, "--get-cover", cover, "--disallow-rendered-cover"], { check: false });
@@ -233,9 +254,10 @@ function polishImportCopy(file, tempDir, cover) {
   const opf = path.join(tempDir, "final.opf");
   const polished = path.join(tempDir, "polished.epub");
   const meta = run("ebook-meta", [file, "--to-opf", opf], { check: false });
-  if (meta.status !== 0 || !fs.existsSync(opf)) return;
+  if (meta.status !== 0 || !nonemptyFile(opf)) throw new Error("Calibre could not export EPUB metadata for cover polishing.");
   const result = run("ebook-polish", ["--opf", opf, "--cover", cover, file, polished], { check: false });
-  if (result.status === 0 && fs.existsSync(polished) && fs.statSync(polished).size) fs.copyFileSync(polished, file);
+  if (result.status !== 0 || !nonemptyFile(polished)) throw new Error("Calibre could not polish the normalized EPUB cover.");
+  fs.copyFileSync(polished, file);
 }
 
 function finalizedImportCopy(input, options = {}) {
@@ -249,7 +271,7 @@ function finalizedImportCopy(input, options = {}) {
     const args = metadataArgs(output, options, !fetched.opf);
     if (fetched.opf) args.push("--from-opf", fetched.opf);
     run("ebook-meta", args);
-    polishImportCopy(output, tempDir, sourceCover || fetched.cover);
+    polishImportCopy(output, tempDir, normalizeCover(sourceCover || fetched.cover, tempDir));
     return { path: output, cleanup: () => fs.rmSync(tempDir, { recursive: true, force: true }) };
   } catch (error) {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -398,5 +420,5 @@ module.exports = {
   kosyncProgress,
   grantBookVisibility,
   health,
-  _test: { finalizedImportCopy }
+  _test: { finalizedImportCopy, normalizeCover }
 };

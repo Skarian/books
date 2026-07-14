@@ -39,6 +39,12 @@ function inputFile(dir) {
   return file;
 }
 
+function normalizedCover(args, source) {
+  const target = `${args.at(-1)}.jpg`;
+  fs.copyFileSync(source, target);
+  return ok(`${target}\n`);
+}
+
 test("ISBN imports use Calibre metadata directly and keep operational identifiers", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-system-test-"));
   const calls = [];
@@ -56,6 +62,7 @@ test("ISBN imports use Calibre metadata directly and keep operational identifier
       fs.writeFileSync(args[args.indexOf("--to-opf") + 1], "<package />\n");
       return ok();
     }
+    if (command === "calibre-debug") return normalizedCover(args, args.at(-2));
     if (command === "ebook-polish") {
       fs.writeFileSync(args.at(-1), "polished");
       return ok();
@@ -89,6 +96,7 @@ test("ISBN imports use Calibre metadata directly and keep operational identifier
   assert.ok(extract < fetched && fetched < clearTags && clearTags < apply && apply < toOpf && toOpf < polish);
   assert.ok(calls[extract].args.includes("--disallow-rendered-cover"));
   assert.equal(calls[fetched].args.includes("--cover"), false);
+  assert.ok(calls[polish].args[calls[polish].args.indexOf("--cover") + 1].endsWith("normalized-cover.jpg"));
   assert.ok(calls[fetched].args.includes("--isbn"));
   assert.ok(calls[fetched].args.includes("9780062010612"));
   assert.ok(calls[apply].args.includes("--isbn"));
@@ -114,6 +122,7 @@ test("import finalization fetches a cover only when the source has none", () => 
       fs.writeFileSync(args[args.indexOf("--to-opf") + 1], "<package />\n");
       return ok();
     }
+    if (command === "calibre-debug") return normalizedCover(args, args.at(-2));
     if (command === "ebook-polish") {
       fs.writeFileSync(args.at(-1), "polished");
       return ok();
@@ -131,7 +140,7 @@ test("import finalization fetches a cover only when the source has none", () => 
   const fetched = calls.find((call) => call.command === "fetch-ebook-metadata");
   const polish = calls.find((call) => call.command === "ebook-polish");
   assert.ok(fetched.args.includes("--cover"));
-  assert.equal(polish.args[polish.args.indexOf("--cover") + 1], fetched.args[fetched.args.indexOf("--cover") + 1]);
+  assert.ok(polish.args[polish.args.indexOf("--cover") + 1].endsWith("normalized-cover.jpg"));
 });
 
 test("ISBN import finalization falls back to local metadata when fetch has no result", () => {
@@ -182,6 +191,7 @@ test("import finalization polishes a source cover when metadata fetch fails", ()
       fs.writeFileSync(args[args.indexOf("--to-opf") + 1], "<package />\n");
       return ok();
     }
+    if (command === "calibre-debug") return normalizedCover(args, args.at(-2));
     if (command === "ebook-polish") {
       fs.writeFileSync(args.at(-1), "polished");
       return ok();
@@ -199,6 +209,50 @@ test("import finalization polishes a source cover when metadata fetch fails", ()
   assert.equal(calls.filter((call) => call.command === "fetch-ebook-metadata").length, 3);
   assert.equal(calls.some((call) => call.command === "fetch-ebook-metadata" && call.args.includes("--cover")), false);
   assert.ok(calls.some((call) => call.command === "ebook-polish"));
+});
+
+test("import finalization fails closed when cover polishing fails", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-system-test-"));
+  const { system, restore } = load(dir, (command, args) => {
+    if (command === "ebook-meta" && args.includes("--get-cover")) {
+      fs.writeFileSync(args[args.indexOf("--get-cover") + 1], "source cover");
+      return ok();
+    }
+    if (command === "ebook-meta" && args.includes("--to-opf")) {
+      fs.writeFileSync(args[args.indexOf("--to-opf") + 1], "<package />\n");
+      return ok();
+    }
+    if (command === "calibre-debug") return normalizedCover(args, args.at(-2));
+    if (command === "ebook-polish") return { status: 1, stdout: "", stderr: "failed" };
+    return ok();
+  });
+
+  try {
+    assert.throws(() => system._test.finalizedImportCopy(inputFile(dir)), /could not polish/);
+  } finally {
+    restore();
+  }
+});
+
+test("cover normalization preserves PNG and converts progressive JPEG to baseline", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-system-cover-test-"));
+  const { system, restore } = load(dir, childProcess.spawnSync);
+  try {
+    const png = path.join(dir, "cover-source");
+    const progressive = path.join(dir, "progressive-source");
+    system.run("calibre-debug", ["-c", "from PIL import Image; import sys; Image.new('RGB', (16, 24), 'red').save(sys.argv[1], 'PNG')", png]);
+    system.run("calibre-debug", ["-c", "from PIL import Image; import sys; Image.new('RGB', (16, 24), 'blue').save(sys.argv[1], 'JPEG', progressive=True)", progressive]);
+
+    const normalizedPng = system._test.normalizeCover(png, dir);
+    const normalizedJpeg = system._test.normalizeCover(progressive, dir);
+    assert.ok(normalizedPng.endsWith(".png"));
+    assert.ok(normalizedJpeg.endsWith(".jpg"));
+    const probe = system.run("calibre-debug", ["-c", "from PIL import Image; import sys; im=Image.open(sys.argv[1]); print(im.format, bool(im.info.get('progressive') or im.info.get('progression')))", normalizedJpeg]);
+    assert.equal(probe.stdout.trim(), "JPEG False");
+  } finally {
+    restore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("Calibre imports use new records and ISBN metadata without title overrides", () => {
