@@ -165,8 +165,9 @@ function readestPage() {
 function crosspointPage() {
   return page("CrossPoint setup", `
 <h1>CrossPoint setup</h1>
-<p>Download the setup ZIP, extract it at the SD card root, then restart CrossPoint.</p>
-<a href="/setup/crosspoint.zip">CrossPoint setup ZIP</a>
+<p>This CrossPoint 1.4.1 fresh-device preset replaces CrossPoint preferences, OPDS servers, and KOSync credentials. It installs the Books profile and Literata font.</p>
+<p>The ZIP contains your Books password. Extract it at the SD card root, restart CrossPoint, then delete the downloaded ZIP.</p>
+<a href="/setup/crosspoint.zip">Books + CrossPoint 1.4.1 preset</a>
 `);
 }
 

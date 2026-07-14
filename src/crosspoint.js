@@ -5,6 +5,8 @@ const config = require("./config");
 const state = require("./state");
 const system = require("./system");
 
+const PRESET_DIR = path.join(__dirname, "..", "assets", "crosspoint");
+
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
@@ -15,6 +17,7 @@ function generate(row) {
   const root = path.join(tempDir, ".crosspoint");
   const zipPath = path.join(tempDir, "crosspoint.zip");
   try {
+    fs.cpSync(PRESET_DIR, tempDir, { recursive: true });
     writeJson(path.join(root, "opds.json"), {
       servers: [{
         name: "Books",
@@ -29,7 +32,7 @@ function generate(row) {
       serverUrl: `https://${config.publicHost}/kosync`,
       matchMethod: 1
     });
-    system.run("zip", ["-qr", zipPath, ".crosspoint"], { cwd: tempDir });
+    system.run("zip", ["-qr", zipPath, ".crosspoint", ".fonts"], { cwd: tempDir });
     return { path: zipPath, tempDir };
   } catch (error) {
     fs.rmSync(tempDir, { recursive: true, force: true });

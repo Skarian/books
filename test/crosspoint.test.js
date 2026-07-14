@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -27,20 +28,41 @@ function zipRead(file, entry) {
   return result.stdout;
 }
 
+function zipReadBuffer(file, entry) {
+  const result = spawnSync("unzip", ["-p", file, entry], { maxBuffer: 2 * 1024 * 1024 });
+  assert.equal(result.status, 0, result.stderr.toString());
+  return result.stdout;
+}
+
 function zipList(file) {
   const result = spawnSync("unzip", ["-Z", "-1", file], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim().split(/\r?\n/);
 }
 
-test("CrossPoint bundle includes OPDS and binary KOSync settings", () => {
+test("CrossPoint bundle includes the Books fresh-device preset", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-crosspoint-test-"));
   const { state, crosspoint } = load(dir);
   state.createAccount({ name: "Alice", slug: "alice" });
   state.updateAccount("alice", { books_password: "alpha-bravo-charlie-delta-echo-foxtrot" });
 
   const bundle = crosspoint.generate(state.getAccount("alice"));
-  assert.deepEqual(zipList(bundle.path).sort(), [".crosspoint/", ".crosspoint/koreader.json", ".crosspoint/opds.json"]);
+  const entries = zipList(bundle.path);
+  assert.deepEqual(entries.sort(), [
+    ".crosspoint/",
+    ".crosspoint/books-preset.json",
+    ".crosspoint/koreader.json",
+    ".crosspoint/opds.json",
+    ".crosspoint/settings.json",
+    ".fonts/",
+    ".fonts/Literata/",
+    ".fonts/Literata/Literata_12.cpfont",
+    ".fonts/Literata/Literata_14.cpfont",
+    ".fonts/Literata/Literata_16.cpfont",
+    ".fonts/Literata/Literata_18.cpfont",
+    ".fonts/Literata/NOTICE.txt",
+    ".fonts/Literata/OFL.txt"
+  ].sort());
 
   const opds = JSON.parse(zipRead(bundle.path, ".crosspoint/opds.json"));
   assert.deepEqual(opds.servers, [{
@@ -58,5 +80,14 @@ test("CrossPoint bundle includes OPDS and binary KOSync settings", () => {
     matchMethod: 1
   });
 
+  const settings = JSON.parse(zipRead(bundle.path, ".crosspoint/settings.json"));
+  const expectedSettings = JSON.parse(fs.readFileSync(path.join(__dirname, "../assets/crosspoint/.crosspoint/settings.json")));
+  assert.deepEqual(settings, expectedSettings);
+
+  const preset = JSON.parse(zipRead(bundle.path, ".crosspoint/books-preset.json"));
+  for (const [name, expected] of Object.entries(preset.literataSha256)) {
+    const actual = crypto.createHash("sha256").update(zipReadBuffer(bundle.path, `.fonts/Literata/${name}`)).digest("hex");
+    assert.equal(actual, expected);
+  }
   crosspoint.cleanup(bundle);
 });

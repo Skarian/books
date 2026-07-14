@@ -45,7 +45,7 @@ After setup, test with a short book from the catalog. Open it on one device and 
 
 Use CrossPoint on XTEink e-ink devices.
 
-The easiest setup path is `https://books.example.com/crosspoint`. Sign in with the Books username and password, download the ZIP, extract it at the SD card root, then restart CrossPoint. The bundle adds the Books OPDS catalog, sets KOSync to `https://books.example.com/kosync`, and uses binary document matching.
+The setup path is `https://books.example.com/crosspoint`. Sign in with the Books username and password, download the fresh-device preset, extract it at the SD card root, then restart CrossPoint. The preset replaces existing CrossPoint preferences, OPDS servers, and KOSync credentials. It configures Books with binary document matching, Literata Medium/14, left alignment with hyphenation, the KOSync shortcut, the three-cover home, and cover sleep. Delete the credential-bearing ZIP after extraction.
 
 Manual setup remains:
 

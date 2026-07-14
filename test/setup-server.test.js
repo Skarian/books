@@ -112,6 +112,8 @@ test("setup server gates bundle downloads by Books account auth", async () => {
   assert.equal(response.statusCode, 200);
   assert.match(response.text(), /\/setup\/crosspoint\.zip/);
   assert.match(response.text(), /SD card root/);
+  assert.match(response.text(), /fresh-device preset/);
+  assert.match(response.text(), /delete the downloaded ZIP/);
   assert.doesNotMatch(response.text(), /bob/);
 
   response = await request(setup, "/setup/koreader-kobo.zip", auth("alice", "alice-password"), options);

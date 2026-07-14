@@ -1,0 +1,12 @@
+{
+  "preset": "Books CrossPoint Fresh-Device Preset",
+  "version": 1,
+  "crosspointVersion": "1.4.1",
+  "fontManifest": "https://github.com/crosspoint-reader/crosspoint-fonts/releases/download/sd-fonts-m1-b4/fonts.json",
+  "literataSha256": {
+    "Literata_12.cpfont": "1adf480114e6779c54791078b008c854723d22c0022babf94c7a8aed549508ad",
+    "Literata_14.cpfont": "1d171e3b21b107dd931448d1ff8102741436d1d91976ecc17beaeea15e52d650",
+    "Literata_16.cpfont": "5a2a9a1bbbf61a7fc5f79550c88a9ea335096562f28d08f1096d96f79d9aeeb9",
+    "Literata_18.cpfont": "9f84e3cf9621cbe0794da6bda1390ed2a57e4ccab9587186e90ea465cfecd6cb"
+  }
+}
