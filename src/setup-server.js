@@ -157,8 +157,16 @@ function koreaderPage() {
 function readestPage() {
   return page("Readest setup", `
 <h1>Readest setup</h1>
-<p>Download the restore ZIP, then in Readest use Advanced Settings -> Backup & Restore -> Restore Library.</p>
-<a href="/setup/readest.zip">Readest restore ZIP</a>
+<ol>
+<li>Create a Readest account and sign in.</li>
+<li>Disable Readest Cloud: Settings &rarr; Integrations &rarr; Cloud Sync &rarr; Readest Cloud off.</li>
+<li>Download the personal <a href="/setup/readest.zip">Readest restore ZIP</a>.</li>
+<li>Restore the ZIP: Advanced Settings &rarr; Backup &amp; Restore &rarr; Restore Library. Select the downloaded ZIP and wait for the restore to finish.</li>
+<li>Hard-refresh Readest: <code>Cmd+Shift+R</code>.</li>
+<li>Create the sync passphrase: Advanced Settings &rarr; Data Sync &rarr; Sync passphrase &rarr; Set passphrase. Enter and confirm a new phrase, then save it somewhere safe.</li>
+<li>Re-enable Readest Cloud: Settings &rarr; Integrations &rarr; Cloud Sync &rarr; Readest Cloud on.</li>
+<li>Delete the restore ZIP because it contains the Books password.</li>
+</ol>
 `);
 }
 

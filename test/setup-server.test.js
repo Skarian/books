@@ -106,6 +106,9 @@ test("setup server gates bundle downloads by Books account auth", async () => {
   assert.equal(response.statusCode, 200);
   assert.match(response.text(), /\/setup\/readest\.zip/);
   assert.match(response.text(), /Restore Library/);
+  assert.match(response.text(), /Cmd\+Shift\+R/);
+  assert.match(response.text(), /Set passphrase/);
+  assert.match(response.text(), /Readest Cloud on/);
   assert.doesNotMatch(response.text(), /bob/);
 
   response = await request(setup, "/crosspoint", auth("alice", "alice-password"), options);

@@ -62,9 +62,9 @@ test("Readest restore bundle includes OPDS and KOSync settings", () => {
     dictionary: false,
     font: true,
     texture: true,
-    opds_catalog: false,
-    settings: false,
-    credentials: false
+    opds_catalog: true,
+    settings: true,
+    credentials: true
   });
   readest.cleanup(bundle);
 });

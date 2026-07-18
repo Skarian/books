@@ -38,9 +38,9 @@ function generate(row) {
         dictionary: false,
         font: true,
         texture: true,
-        opds_catalog: false,
-        settings: false,
-        credentials: false
+        opds_catalog: true,
+        settings: true,
+        credentials: true
       }
     }, null, 2)}\n`, { mode: 0o600 });
     system.run("zip", ["-qr", zipPath, "library.json", "settings.json"], { cwd: tempDir });

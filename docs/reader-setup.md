@@ -23,18 +23,14 @@ KOSync:   https://books.example.com/kosync
 
 Use the [Readest app](https://github.com/readest/readest) or [web.readest.com](https://web.readest.com/).
 
-1. Sign in to your Readest account.
-2. From the library page, open **Import Menu → Online Library**.
-3. Add an OPDS catalog at `https://books.example.com/catalog`.
-4. Sign in with your Books username and password.
-5. Browse the catalog and download a book.
-6. Open the book.
-7. Open **Book Menu → KOReader Sync**.
-8. Set the server to `https://books.example.com/kosync`.
-9. Sign in with the same Books username and password.
-10. Set **Checksum Method** to **File Content**.
-
-Repeat on each Readest device. Readest may copy catalog settings across signed-in devices. Credentials sync is optional and requires a Readest sync passphrase on every device — if you skip that, configure the Books login by hand on each device.
+1. Create a Readest account and sign in.
+2. Disable Readest Cloud: **Settings → Integrations → Cloud Sync → Readest Cloud off**.
+3. Open `https://books.example.com/readest`, enter your Books username and password, and download the personal **Readest restore ZIP**.
+4. Restore the ZIP: **Advanced Settings → Backup & Restore → Restore Library**. Select the downloaded ZIP and wait for the restore to finish.
+5. Hard-refresh Readest: `Cmd+Shift+R`.
+6. Create the sync passphrase: **Advanced Settings → Data Sync → Sync passphrase → Set passphrase**. Enter and confirm a new phrase, then save it somewhere safe.
+7. Re-enable Readest Cloud: **Settings → Integrations → Cloud Sync → Readest Cloud on**.
+8. Delete the restore ZIP because it contains the Books password.
 
 ---
 

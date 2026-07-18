@@ -21,23 +21,16 @@ Download each book from the catalog on every device before opening it. KOSync ma
 
 ## Readest — Web, Android, iPad, macOS, Windows
 
-Readest is the primary reader app for non-e-ink devices. Set up OPDS and KOReader Sync on each Readest installation.
+Readest is the primary reader app for non-e-ink devices.
 
-1. Install [Readest](https://github.com/readest/readest) or open [web.readest.com](https://web.readest.com/).
-2. Sign in to a Readest account.
-3. From the library page, open **Import Menu → Online Library**.
-4. Add an OPDS catalog at `https://books.example.com/catalog`.
-5. Sign in with the user's Books username and password.
-6. Browse the catalog and download a book.
-7. Open the book.
-8. Open **Book Menu → KOReader Sync**.
-9. Set the server to `https://books.example.com/kosync`.
-10. Sign in with the same Books username and password.
-11. Set **Checksum Method** to **File Content**.
-
-Repeat on each Readest device. Readest may sync catalog URLs across signed-in devices. Password sync uses Readest's optional Credentials sync with a shared passphrase — re-enter the Books login on any device that needs the catalog or KOSync settings.
-
-After setup, test with a short book from the catalog. Open it on one device and advance to a clear chapter, then open the same catalog download on another device. If the second device lands near the same spot, the sync path is working.
+1. Create a Readest account and sign in.
+2. Disable Readest Cloud: **Settings → Integrations → Cloud Sync → Readest Cloud off**.
+3. Open `https://books.example.com/readest`, enter the user's Books username and password, and download the personal **Readest restore ZIP**.
+4. Restore the ZIP: **Advanced Settings → Backup & Restore → Restore Library**. Select the downloaded ZIP and wait for the restore to finish.
+5. Hard-refresh Readest: `Cmd+Shift+R`.
+6. Create the sync passphrase: **Advanced Settings → Data Sync → Sync passphrase → Set passphrase**. Enter and confirm a new phrase, then save it somewhere safe.
+7. Re-enable Readest Cloud: **Settings → Integrations → Cloud Sync → Readest Cloud on**.
+8. Delete the restore ZIP because it contains the Books password.
 
 ---
 
