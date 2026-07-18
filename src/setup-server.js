@@ -157,15 +157,36 @@ function koreaderPage() {
 function readestPage() {
   return page("Readest setup", `
 <h1>Readest setup</h1>
+<h2>Original device</h2>
 <ol>
 <li>Create a Readest account and sign in.</li>
 <li>Disable Readest Cloud: Settings &rarr; Integrations &rarr; Cloud Sync &rarr; Readest Cloud off.</li>
 <li>Download the personal <a href="/setup/readest.zip">Readest restore ZIP</a>.</li>
 <li>Restore the ZIP: Advanced Settings &rarr; Backup &amp; Restore &rarr; Restore Library. Select the downloaded ZIP and wait for the restore to finish.</li>
-<li>Hard-refresh Readest: <code>Cmd+Shift+R</code>.</li>
+<li>Reload Readest. On macOS, press <code>Cmd+Shift+R</code>; on Windows or Linux, press <code>Ctrl+Shift+R</code>; on mobile, force-close Readest and reopen it.</li>
+<li>Open Advanced Settings &rarr; Data Sync and confirm OPDS catalogs, App settings, and Credentials are on.</li>
 <li>Create the sync passphrase: Advanced Settings &rarr; Data Sync &rarr; Sync passphrase &rarr; Set passphrase. Enter and confirm a new phrase, then save it somewhere safe.</li>
 <li>Re-enable Readest Cloud: Settings &rarr; Integrations &rarr; Cloud Sync &rarr; Readest Cloud on.</li>
-<li>Delete the restore ZIP because it contains the Books password.</li>
+</ol>
+<h2>Other device</h2>
+<ol>
+<li>Sign in to the same Readest account.</li>
+<li>Open Advanced Settings &rarr; Data Sync. Confirm OPDS catalogs and App settings are on, then turn Credentials on.</li>
+<li>Under Sync passphrase, select Enter passphrase and enter the passphrase created on the original device.</li>
+<li>Open Settings &rarr; Integrations &rarr; Cloud Sync and confirm Readest Cloud is on.</li>
+</ol>
+<h2>Upload the restored setup</h2>
+<p>Return to the original device. Restoring writes the setup locally, but Readest does not automatically upload those restored values. The next actions trigger the missing uploads.</p>
+<ol>
+<li>Open Settings &rarr; Integrations &rarr; OPDS Catalogs. Open the &vellip; menu on Books and select Edit.</li>
+<li>Readest Web shows a web-proxy consent box; check it. Native apps do not show this box. Select Save Changes without changing any values.</li>
+<li>Open Settings &rarr; Integrations &rarr; KOReader. Turn Sync Server Connected off and wait 10 seconds. This settings action makes Readest upload the restored KOReader server and credentials. Turn Sync Server Connected back on, then wait another 10 seconds.</li>
+</ol>
+<h2>Finish on the other device</h2>
+<ol>
+<li>Reload Readest. On macOS, press <code>Cmd+Shift+R</code>; on Windows or Linux, press <code>Ctrl+Shift+R</code>; on mobile, force-close Readest and reopen it.</li>
+<li>Open Settings &rarr; Integrations &rarr; KOReader and turn Sync Server Connected on. This switch is device-specific.</li>
+<li>On the original device, delete the restore ZIP because it contains the Books password.</li>
 </ol>
 `);
 }

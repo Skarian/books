@@ -107,7 +107,11 @@ test("setup server gates bundle downloads by Books account auth", async () => {
   assert.match(response.text(), /\/setup\/readest\.zip/);
   assert.match(response.text(), /Restore Library/);
   assert.match(response.text(), /Cmd\+Shift\+R/);
+  assert.match(response.text(), /force-close Readest and reopen it/);
   assert.match(response.text(), /Set passphrase/);
+  assert.match(response.text(), /Enter passphrase/);
+  assert.match(response.text(), /Save Changes/);
+  assert.match(response.text(), /Sync Server Connected off/);
   assert.match(response.text(), /Readest Cloud on/);
   assert.doesNotMatch(response.text(), /bob/);
 
