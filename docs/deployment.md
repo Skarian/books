@@ -56,7 +56,7 @@ Bootstrap creates the data directory structure and initializes the Calibre admin
 docker compose run --rm admin bootstrap
 ```
 
-Run `bootstrap` once on a fresh install. It is safe to run again after a restore.
+Run `bootstrap` once on a fresh install, before starting the stack. To run it again after a restore, stop the stack first; bootstrap initializes the library directly, while normal runtime access goes through the Calibre Content Server.
 
 ## Start the stack
 

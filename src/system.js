@@ -24,25 +24,6 @@ function ensureDir(dir, mode = 0o750) {
   fs.mkdirSync(dir, { recursive: true, mode });
 }
 
-function withDirLock(name, callback) {
-  const lockDir = path.join(config.configDir, `${name}.lock`);
-  fs.mkdirSync(config.configDir, { recursive: true });
-  for (let i = 0; ; i += 1) {
-    try {
-      fs.mkdirSync(lockDir);
-      break;
-    } catch (error) {
-      if (error.code !== "EEXIST" || i === 400) throw error;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-    }
-  }
-  try {
-    return callback();
-  } finally {
-    fs.rmSync(lockDir, { recursive: true, force: true });
-  }
-}
-
 function secrets(create = false) {
   let data = {};
   if (fs.existsSync(config.secretsFile)) {
@@ -88,7 +69,7 @@ function calibredb(args, options = {}) {
   fs.writeFileSync(passwordFile, calibreAdminPassword(), { mode: 0o600 });
   try {
     return run("calibredb", [
-      "--with-library", options.library || `${config.calibreUrl}/#${config.calibreLibraryId}`,
+      "--with-library", `${config.calibreUrl}/#${config.calibreLibraryId}`,
       "--username", config.calibreAdminUser,
       "--password", `<f:${passwordFile}>`,
       ...args
@@ -98,6 +79,10 @@ function calibredb(args, options = {}) {
   }
 }
 
+function localCalibredb(args, options = {}) {
+  return run("calibredb", ["--with-library", config.libraryDir, ...args], options);
+}
+
 function parseBookIds(output) {
   const match = String(output || "").match(/(?:Added|Merged) book ids:\s*([0-9,\s]+)/);
   return match ? match[1].split(/[,\s]+/).filter(Boolean).map((id) => Number(id)) : [];
@@ -105,10 +90,14 @@ function parseBookIds(output) {
 
 function ensureOwnershipColumn() {
   const result = calibredb(["custom_columns"], { check: false });
+  if (result.status !== 0) throw new Error([result.stdout, result.stderr].filter(Boolean).join("\n").trim() || "Could not inspect Calibre custom columns through the Content Server.");
+  if (!/\bbooks_users\b/.test(result.stdout)) throw new Error("Calibre ownership column is missing. Stop the stack and run `docker compose run --rm admin bootstrap`.");
+}
+
+function bootstrapOwnershipColumn() {
+  const result = localCalibredb(["custom_columns"], { check: false });
   if (result.status === 0 && /\bbooks_users\b/.test(result.stdout)) return;
-  const local = run("calibredb", ["--with-library", config.libraryDir, "custom_columns"], { check: false });
-  if (local.status === 0 && /\bbooks_users\b/.test(local.stdout)) return;
-  const add = run("calibredb", ["--with-library", config.libraryDir, "add_custom_column", "books_users", "Books Users", "text", "--is-multiple"], { check: false });
+  const add = localCalibredb(["add_custom_column", "books_users", "Books Users", "text", "--is-multiple"], { check: false });
   if (add.status !== 0 && !/(books_users|UNIQUE constraint failed: custom_columns\.label)/i.test(`${add.stdout}\n${add.stderr}`)) {
     throw new Error([add.stdout, add.stderr].filter(Boolean).join("\n").trim() || "Could not create Calibre ownership column.");
   }
@@ -138,23 +127,41 @@ function findBookByIdentifier(key, value) {
 
 function listUserEpubBooks(slug) {
   const user = state.validateUsers([slug])[0];
-  const result = calibredb(["list", "--search", `#books_users:"=${user}"`, "--fields", "id,title,authors,identifiers,formats", "--for-machine"], { library: config.libraryDir });
+  const result = calibredb(["list", "--search", `#books_users:"=${user}"`, "--fields", "id,title,authors,identifiers,formats", "--for-machine"]);
   return JSON.parse(result.stdout).map((book) => ({
     id: Number(book.id),
     title: book.title || "",
     authors: book.authors || "",
     identifiers: book.identifiers || {},
-    epubPath: (book.formats || []).find((file) => /\.epub$/i.test(file))
+    epubPath: (book.formats || []).some((format) => /^EPUB$/i.test(format)) ? storedEpubPath(book.id) : null
   })).filter((book) => book.epubPath);
 }
 
+function storedEpubPath(calibreBookId) {
+  const suffix = ` (${Number(calibreBookId)})`;
+  const matches = [];
+  for (const author of fs.readdirSync(config.libraryDir, { withFileTypes: true })) {
+    if (!author.isDirectory()) continue;
+    const authorDir = path.join(config.libraryDir, author.name);
+    for (const title of fs.readdirSync(authorDir, { withFileTypes: true })) {
+      if (!title.isDirectory() || !title.name.endsWith(suffix)) continue;
+      const titleDir = path.join(authorDir, title.name);
+      for (const file of fs.readdirSync(titleDir, { withFileTypes: true })) {
+        if (file.isFile() && /\.epub$/i.test(file.name)) matches.push(path.join(titleDir, file.name));
+      }
+    }
+  }
+  if (matches.length > 1) throw new Error(`Multiple stored EPUB files found for Calibre book ${calibreBookId}`);
+  return matches[0] || null;
+}
+
 function addIdentifier(calibreBookId, key, value) {
-  const result = calibredb(["list", "--search", `id:=${calibreBookId}`, "--fields", "id,identifiers", "--for-machine"], { library: config.libraryDir });
+  const result = calibredb(["list", "--search", `id:=${calibreBookId}`, "--fields", "id,identifiers", "--for-machine"]);
   const [book] = JSON.parse(result.stdout);
   if (!book || Number(book.id) !== Number(calibreBookId)) throw new Error(`Calibre book not found: ${calibreBookId}`);
   const identifiers = { ...(book.identifiers || {}), [key]: String(value) };
   const field = Object.entries(identifiers).map(([name, id]) => `${name}:${id}`).join(",");
-  calibredb(["set_metadata", String(calibreBookId), "--field", `identifiers:${field}`], { library: config.libraryDir });
+  calibredb(["set_metadata", String(calibreBookId), "--field", `identifiers:${field}`]);
 }
 
 function koreaderDocumentHash(file) {
@@ -345,36 +352,34 @@ function importFiles(files, options = {}) {
   const users = state.validateUsers(options.users || []);
   if (!users.length) throw new Error("Import requires at least one --user owner.");
   ensureDir(config.libraryDir, 0o770);
-  return withDirLock("calibre-write", () => {
-    const imported = [];
-    for (const input of files) {
-      if (!fs.existsSync(input) || !fs.statSync(input).isFile()) throw new Error(`Not a file: ${input}`);
-      const extension = path.extname(input).slice(1).toLowerCase();
-      if (extension !== "epub") throw new Error(`Only EPUB imports are supported: ${input}`);
-      const title = options.title || path.basename(input, path.extname(input));
-      let calibreBookId;
-      const finalized = finalizedImportCopy(input, options);
-      const args = ["add", "--automerge", "new_record"];
-      if (!options.isbn) {
-        args.push("--languages", config.defaultLanguage);
-        if (options.title) args.push("--title", options.title);
-        if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
-      }
-      if (options.isbn) args.push("--isbn", options.isbn);
-      if (options.annaMd5) args.push("--identifier", `anna:${options.annaMd5}`);
-      try {
-        const result = calibredb([...args, finalized.path]);
-        const ids = parseBookIds(`${result.stdout}\n${result.stderr}`);
-        if (ids.length !== 1) throw new Error(`Could not determine imported Calibre book id for ${input}`);
-        calibreBookId = ids[0];
-      } finally {
-        finalized.cleanup();
-      }
-      const granted = grantBookVisibility(calibreBookId, users);
-      imported.push({ calibre_book_id: calibreBookId, users: granted, title });
+  const imported = [];
+  for (const input of files) {
+    if (!fs.existsSync(input) || !fs.statSync(input).isFile()) throw new Error(`Not a file: ${input}`);
+    const extension = path.extname(input).slice(1).toLowerCase();
+    if (extension !== "epub") throw new Error(`Only EPUB imports are supported: ${input}`);
+    const title = options.title || path.basename(input, path.extname(input));
+    let calibreBookId;
+    const finalized = finalizedImportCopy(input, options);
+    const args = ["add", "--automerge", "new_record"];
+    if (!options.isbn) {
+      args.push("--languages", config.defaultLanguage);
+      if (options.title) args.push("--title", options.title);
+      if (options.authors && options.authors.length) args.push("--authors", options.authors.join(" & "));
     }
-    return imported;
-  });
+    if (options.isbn) args.push("--isbn", options.isbn);
+    if (options.annaMd5) args.push("--identifier", `anna:${options.annaMd5}`);
+    try {
+      const result = calibredb([...args, finalized.path]);
+      const ids = parseBookIds(`${result.stdout}\n${result.stderr}`);
+      if (ids.length !== 1) throw new Error(`Could not determine imported Calibre book id for ${input}`);
+      calibreBookId = ids[0];
+    } finally {
+      finalized.cleanup();
+    }
+    const granted = grantBookVisibility(calibreBookId, users);
+    imported.push({ calibre_book_id: calibreBookId, users: granted, title });
+  }
+  return imported;
 }
 
 function bootstrap() {
@@ -383,10 +388,13 @@ function bootstrap() {
     config.logDir, path.join(config.dataDir, "kosync", "redis"),
     path.join(config.logDir, "kosync", "redis"), path.join(config.logDir, "kosync", "app")
   ]) ensureDir(dir, dir === config.configDir || dir === config.logDir ? 0o750 : 0o770);
-  calibreSetUser(config.calibreAdminUser, calibreAdminPassword(true), false);
+  calibreAdminPassword(true);
+  const live = calibredb(["list", "--limit", "1"], { check: false });
+  if (live.status === 0) throw new Error("Calibre is running. Stop the stack before running bootstrap so the library has only one owner.");
+  calibreSetUser(config.calibreAdminUser, calibreAdminPassword(), false);
   setCalibreRestrictions(config.calibreAdminUser, null);
-  run("calibredb", ["--with-library", config.libraryDir, "list"], { check: false });
-  ensureOwnershipColumn();
+  localCalibredb(["list"], { check: false });
+  bootstrapOwnershipColumn();
 }
 
 async function fetchOk(url, options = {}) {
@@ -420,5 +428,5 @@ module.exports = {
   kosyncProgress,
   grantBookVisibility,
   health,
-  _test: { finalizedImportCopy, normalizeCover }
+  _test: { finalizedImportCopy, normalizeCover, storedEpubPath }
 };

@@ -100,6 +100,8 @@ Runtime state lives under the data directory (`BOOKS_HOST_DATA_DIR`, default `./
 
 `state.json` is the source of truth for Books accounts. Calibre stores book metadata and the hidden per-book `#books_users` grant field that drives catalog visibility. KOSync stores reading progress. Writes to `state.json` use a lock directory and an atomic rename (`writeFileSync` to a `.tmp` path, then `renameSync`) to avoid partial writes under concurrent access.
 
+While the stack is running, the Calibre Content Server is the only process allowed to open the library database. Worker and admin catalog operations use authenticated remote `calibredb` calls. They may read stored EPUB bytes from the mounted library for hashing, but do not open `metadata.db` locally. Direct library initialization is confined to the pre-start `bootstrap` command, which refuses to run when Calibre is reachable.
+
 Neither `state.json` nor `secrets.json` belong in git.
 
 ## Progress sync

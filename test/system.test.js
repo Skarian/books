@@ -294,3 +294,121 @@ test("Calibre imports use new records and ISBN metadata without title overrides"
   assert.equal(add.args.includes("--languages"), false);
   assert.equal(add.args.includes("--tags"), false);
 });
+
+test("runtime Calibre catalog access uses only the authenticated Content Server", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-system-remote-test-"));
+  const calls = [];
+  const { config, state, system, restore } = load(dir, (command, args) => {
+    calls.push({ command, args: args.slice() });
+    if (command !== "calibredb") return ok();
+    if (args.includes("custom_columns")) return ok("books_users\n");
+    if (args.includes("list") && args.includes("id,identifiers")) {
+      return ok(JSON.stringify([{ id: 7, identifiers: { isbn: "9780062010612" } }]));
+    }
+    if (args.includes("list")) {
+      return ok(JSON.stringify([{
+        id: 7,
+        title: "Power",
+        authors: "Jeffrey Pfeffer",
+        identifiers: { isbn: "9780062010612" },
+        formats: ["EPUB"]
+      }]));
+    }
+    return ok();
+  });
+
+  try {
+    fs.mkdirSync(config.configDir, { recursive: true });
+    fs.writeFileSync(config.secretsFile, JSON.stringify({ calibre_admin_password: "secret" }));
+    state.createAccount({ name: "Alice", slug: "alice" });
+    const bookDir = path.join(config.libraryDir, "Jeffrey Pfeffer", "Power (7)");
+    fs.mkdirSync(bookDir, { recursive: true });
+    const epub = path.join(bookDir, "Power - Jeffrey Pfeffer.epub");
+    fs.writeFileSync(epub, "epub");
+
+    assert.deepEqual(system.listUserEpubBooks("alice"), [{
+      id: 7,
+      title: "Power",
+      authors: "Jeffrey Pfeffer",
+      identifiers: { isbn: "9780062010612" },
+      epubPath: epub
+    }]);
+    system.addIdentifier(7, "hardcover", "42");
+    assert.deepEqual(system.grantBookVisibility(7, ["alice"]), ["alice"]);
+  } finally {
+    restore();
+  }
+
+  const calibreCalls = calls.filter((call) => call.command === "calibredb");
+  assert.ok(calibreCalls.length >= 5);
+  for (const call of calibreCalls) {
+    const library = call.args[call.args.indexOf("--with-library") + 1];
+    assert.equal(library, "http://calibre:8080/#library");
+    assert.equal(call.args.includes(path.join(dir, "library")), false);
+  }
+  const update = calibreCalls.find((call) => call.args.includes("set_metadata"));
+  assert.ok(update.args.includes("identifiers:isbn:9780062010612,hardcover:42"));
+});
+
+test("runtime refuses to create a missing ownership column by opening the library locally", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-system-column-test-"));
+  const calls = [];
+  const { config, state, system, restore } = load(dir, (command, args) => {
+    calls.push({ command, args: args.slice() });
+    return command === "calibredb" && args.includes("custom_columns") ? ok("other_column\n") : ok();
+  });
+
+  try {
+    fs.mkdirSync(config.configDir, { recursive: true });
+    fs.writeFileSync(config.secretsFile, JSON.stringify({ calibre_admin_password: "secret" }));
+    state.createAccount({ name: "Alice", slug: "alice" });
+    assert.throws(() => system.grantBookVisibility(7, ["alice"]), /ownership column is missing/);
+  } finally {
+    restore();
+  }
+
+  assert.equal(calls.some((call) => call.args.includes("add_custom_column")), false);
+  assert.equal(calls.some((call) => call.args.includes(path.join(dir, "library"))), false);
+});
+
+test("bootstrap refuses direct library initialization while the Content Server is running", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-system-bootstrap-test-"));
+  const calls = [];
+  const { config, system, restore } = load(dir, (command, args) => {
+    calls.push({ command, args: args.slice() });
+    return command === "calibredb" && args.includes("--limit") ? ok("[]\n") : ok();
+  });
+
+  try {
+    assert.throws(() => system.bootstrap(), /Calibre is running/);
+  } finally {
+    restore();
+  }
+
+  assert.ok(fs.existsSync(config.secretsFile));
+  assert.equal(calls.some((call) => call.args.includes(config.libraryDir)), false);
+});
+
+test("bootstrap initializes the local library only when the Content Server is unavailable", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "books-system-bootstrap-local-test-"));
+  const calls = [];
+  const { config, system, restore } = load(dir, (command, args) => {
+    calls.push({ command, args: args.slice() });
+    if (command === "calibredb" && args.includes("http://calibre:8080/#library")) {
+      return { status: 1, stdout: "", stderr: "connection refused" };
+    }
+    if (command === "calibredb" && args.includes("custom_columns")) return ok("");
+    return ok();
+  });
+
+  try {
+    system.bootstrap();
+  } finally {
+    restore();
+  }
+
+  const localCalls = calls.filter((call) => call.command === "calibredb" && call.args.includes(config.libraryDir));
+  assert.ok(localCalls.some((call) => call.args.includes("list")));
+  assert.ok(localCalls.some((call) => call.args.includes("add_custom_column")));
+  assert.equal(localCalls.every((call) => !call.args.includes("--username") && !call.args.includes("--password")), true);
+});
