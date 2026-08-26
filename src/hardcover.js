@@ -3,13 +3,13 @@ const path = require("path");
 const config = require("./config");
 const state = require("./state");
 const system = require("./system");
+const shelfmark = require("./shelfmark");
+const ai = require("./ai");
 
 const GRAPHQL_URL = "https://api.hardcover.app/v1/graphql";
 const WANT_TO_READ_STATUS = 1;
 const CURRENTLY_READING_STATUS = 2;
 const PROGRESS_THRESHOLD = 0.01;
-const TITLE_STOPWORDS = new Set(["a", "an", "and", "are", "as", "at", "by", "for", "from", "has", "have", "in", "into", "it", "of", "on", "or", "the", "to", "with"]);
-const AUTHOR_SUFFIXES = new Set(["jr", "sr", "ii", "iii", "iv"]);
 const ANNA_STATS = ["downloads_total", "great_quality_count", "lists_count", "reports_count"];
 
 function normalizeToken(token) {
@@ -201,85 +201,8 @@ function safeFilename(value) {
   return (String(value).replace(/[^A-Za-z0-9._ -]+/g, "").replace(/\s+/g, " ").trim().slice(0, 120) || "book") + ".epub";
 }
 
-function parseAnnaBlocks(output) {
-  const blocks = [];
-  let current = null;
-  for (const raw of output.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (/^Book \d+:$/.test(line)) {
-      if (current) blocks.push(current);
-      current = {};
-      continue;
-    }
-    if (!current || !line.includes(":")) continue;
-    const index = line.indexOf(":");
-    current[line.slice(0, index).toLowerCase()] = line.slice(index + 1).trim();
-  }
-  if (current) blocks.push(current);
-  return blocks;
-}
-
-function meaningfulTokens(value) {
-  return (String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/['\u2019]/g, "").toLowerCase().match(/[a-z0-9]+/g) || [])
-    .filter((token) => !TITLE_STOPWORDS.has(token) && (/^\d+$/.test(token) || token.length >= 3));
-}
-
-function tokenSet(value) {
-  return new Set(meaningfulTokens(value));
-}
-
-function hasAsciiLeadingTitle(value) {
-  return /^[A-Za-z0-9]/.test(String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/^[\s"'([{<]+/, ""));
-}
-
-function titleVariants(value) {
-  const text = String(value || "");
-  const variants = [text, text.replace(/[\[(（].*$/, "")];
-  for (const part of variants.slice()) {
-    variants.push(part.split(/[:：]/)[0]);
-    const pieces = part.split(/\s+-\s+|--+/);
-    if (pieces.length > 1) variants.push(pieces[0], pieces[pieces.length - 1]);
-  }
-  return variants;
-}
-
-function authorSurnames(author) {
-  return String(author || "").split(/\s*(?:,|&|\band\b)\s*/i).map((name) => {
-    const tokens = meaningfulTokens(name).filter((token) => !AUTHOR_SUFFIXES.has(token));
-    return tokens[tokens.length - 1];
-  }).filter(Boolean);
-}
-
-function authorTokens(author) {
-  return new Set(meaningfulTokens(author).filter((token) => !AUTHOR_SUFFIXES.has(token)));
-}
-
-function titleIdentityScore(candidateTitle, title, author) {
-  const wanted = meaningfulTokens(title);
-  if (!wanted.length) return 0;
-  const authorWords = authorTokens(author);
-  for (const token of wanted) authorWords.delete(token);
-  return Math.max(0, ...titleVariants(candidateTitle).map((variant) => {
-    const tokens = meaningfulTokens(variant).filter((token) => !authorWords.has(token));
-    return wanted.every((token) => tokens.includes(token)) ? Math.round((100 * wanted.length) / tokens.length) : 0;
-  }));
-}
-
-function isEligibleCandidate(item, title, author) {
-  if (!isDownloadableCandidate(item)) return false;
-  if (hasAsciiLeadingTitle(title) && !hasAsciiLeadingTitle(item.title)) return false;
-  if (titleIdentityScore(item.title, title, author) < 60) return false;
-
-  if (String(author || "").trim()) {
-    const surnames = authorSurnames(author);
-    const candidateAuthorTokens = tokenSet(item.authors);
-    if (!surnames.length || !surnames.some((token) => candidateAuthorTokens.has(token))) return false;
-  }
-  return true;
-}
-
 function isDownloadableCandidate(item) {
-  if (!item.hash || String(item.format || "").trim().toLowerCase() !== "epub") return false;
+  if (!/^[a-f0-9]{32}$/i.test(String(item.hash || "")) || String(item.format || "").trim().toLowerCase() !== "epub") return false;
   if (!["english", "eng", "en"].includes(String(item.language || "").trim().toLowerCase())) return false;
   return true;
 }
@@ -338,49 +261,80 @@ function dedupeCandidates(candidates) {
   return Array.from(byHash.values());
 }
 
-async function selectCandidate(items, title, author, options = {}) {
-  const candidates = dedupeCandidates(items.map((item, index) => ({ ...item, _annaRank: item._annaRank ?? index }))
-    .filter((item) => options.identity === false ? isDownloadableCandidate(item) : isEligibleCandidate(item, title, author)));
+async function rankCandidates(items, title) {
+  const candidates = dedupeCandidates(items.map((item, index) => ({
+    ...item,
+    hash: String(item.hash || "").toLowerCase(),
+    _annaRank: item._annaRank ?? index
+  }))
+    .filter(isDownloadableCandidate));
   const cache = new Map();
   await Promise.all(candidates.map(async (item) => {
     item._annaStats = await fetchAnnaStats(item.hash, cache);
   }));
   candidates.sort(compareCandidates);
   if (!candidates.length) throw new Error(`No English EPUB candidate found for ${title}`);
-  return candidates[0];
+  return candidates;
+}
+
+async function selectCandidate(items, title, author, edition = {}) {
+  const candidates = await rankCandidates(items, title);
+  if (candidates.length === 1) return { ...candidates[0], _candidateCount: 1, _selectionReason: "only candidate" };
+  const selection = await ai.selectBookCandidate({
+    title,
+    author,
+    isbn_10: edition.isbn_10,
+    isbn_13: edition.isbn_13
+  }, candidates);
+  const selected = candidates.find((candidate) => candidate.hash === selection.selected_md5);
+  if (!selected) throw new Error("AI provider selected an unknown candidate.");
+  return { ...selected, _candidateCount: candidates.length, _selectionReason: selection.reason };
 }
 
 function editionIsbns(edition = {}) {
   return Array.from(new Set([edition.isbn_10, edition.isbn_13].flatMap((isbn) => isbnValues({ isbn }))));
 }
 
-function searchCandidates(query, title, author, options = {}) {
-  const result = system.annas(["book-search", query], { check: false });
-  if (result.status !== 0) throw new Error(result.stderr || result.stdout || `Anna search failed for ${title}`);
-  return parseAnnaBlocks(result.stdout).map((item, index) => ({ ...item, _annaRank: index, _isbn: options.isbn }));
+async function searchCandidates(query, options = {}) {
+  const releases = await shelfmark.searchReleases(query);
+  return releases.map((release, index) => ({
+    title: release.title,
+    authors: release.extra?.author || release.author,
+    language: release.language,
+    format: release.format,
+    hash: /^[a-f0-9]{32}$/i.test(String(release.source_id || "")) ? String(release.source_id).toLowerCase() : "",
+    _annaRank: index,
+    _isbn: options.isbn,
+    _shelfmarkRelease: release
+  }));
 }
 
 async function findCandidate(title, author, edition = {}) {
-  const isbnCandidates = editionIsbns(edition)
-    .flatMap((isbn) => searchCandidates(isbn, title, author, { isbn }))
-    .filter(isDownloadableCandidate);
-  if (isbnCandidates.length) return selectCandidate(isbnCandidates, title, author, { identity: false });
-  const query = `${title} ${author} epub english`.trim();
-  return selectCandidate(searchCandidates(query, title, author), title, author);
+  const isbnCandidates = [];
+  for (const isbn of editionIsbns(edition)) {
+    isbnCandidates.push(...(await searchCandidates(isbn, { isbn })).filter(isDownloadableCandidate));
+  }
+  if (isbnCandidates.length) return selectCandidate(isbnCandidates, title, author, edition);
+  const query = `${title} ${author}`.trim();
+  return selectCandidate(await searchCandidates(query), title, author, edition);
 }
 
-function downloadCandidate(candidate, filename) {
-  fs.mkdirSync(config.downloadDir, { recursive: true });
-  const downloadPath = path.join(config.downloadDir, filename);
+async function downloadCandidate(candidate, filename) {
+  fs.mkdirSync(config.shelfmarkDownloadDir, { recursive: true });
+  const downloadPath = path.join(config.shelfmarkDownloadDir, filename);
   if (fs.existsSync(downloadPath)) return downloadPath;
   if (config.hardcoverDailyDownloadCap > 0 && state.dailyCount() >= config.hardcoverDailyDownloadCap) {
     throw new Error(`Daily Anna download cap reached: ${state.dailyCount()}/${config.hardcoverDailyDownloadCap}`);
   }
-  const result = system.annas(["book-download", candidate.hash, filename], { check: false });
-  if (result.status !== 0) throw new Error(result.stderr || result.stdout || `Anna download failed for ${candidate.hash}`);
-  if (!fs.existsSync(downloadPath)) throw new Error(`Anna download completed but ${downloadPath} was not found.`);
+  const staged = await shelfmark.downloadRelease(candidate._shelfmarkRelease || {
+    source_id: candidate.hash,
+    title: candidate.title,
+    format: candidate.format,
+    language: candidate.language,
+    extra: { author: candidate.authors }
+  }, path.basename(filename, ".epub"));
   state.incrementDaily();
-  return downloadPath;
+  return staged;
 }
 
 function normalizeText(value) {
@@ -590,7 +544,7 @@ async function fulfillRequest(row, userBook, title, author, candidate) {
   }
 
   const filename = safeFilename(title);
-  const downloadPath = downloadCandidate(candidate, filename);
+  const downloadPath = await downloadCandidate(candidate, filename);
   const [book] = system.importFiles([downloadPath], {
     users: [row.slug],
     annaMd5: candidate.hash,
@@ -617,7 +571,7 @@ async function syncUser(row, options = {}) {
       console.log(`${row.slug}: searching ${title}${author ? ` by ${author}` : ""}`);
       const candidate = await findCandidate(title, author, userBook.edition);
       if (options.dryRun) {
-        console.log(`dry-run candidate: ${candidate.hash} ${candidate.format} ${candidate.language} ${candidate.title}`);
+        console.log(`dry-run candidate: ${candidate.hash} ${candidate.format} ${candidate.language} ${candidate.title} candidates=${candidate._candidateCount} downloads=${annaStat(candidate, "downloads_total")} reason=${candidate._selectionReason}`);
         processedCount += 1;
         continue;
       }
@@ -663,14 +617,13 @@ module.exports = {
   sync,
   _test: {
     findCandidate,
-    isEligibleCandidate,
     isbnValues,
     editionIsbn,
     progressPages,
     progressTime,
     pushReadingProgress,
+    rankCandidates,
     selectCandidate,
-    titleIdentityScore,
     fulfillRequest
   }
 };

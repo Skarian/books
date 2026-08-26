@@ -30,6 +30,8 @@ module.exports = {
   calibreUrl: "http://calibre:8080",
   calibreAdminUser: "books_admin",
   kosyncInternalUrl: "http://kosync:17200",
+  shelfmarkUrl: "http://shelfmark:8084",
+  shelfmarkDownloadDir: path.join(dataDir, "shelfmark", "downloads"),
   annasBin: "/opt/books/bin/annas-mcp",
   annasSecretKey: secret("/run/secrets/annas_secret_key"),
   annasBaseUrl: value("ANNAS_BASE_URL", "annas-archive.gl"),

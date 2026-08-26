@@ -78,11 +78,13 @@ services:
     command: ["sh", "-lc", "while true; do node src/cli.js hardcover sync; sleep 60; done"]
     volumes:
       - ${BOOKS_HOST_DATA_DIR:-./data}:/srv/books
+      - ${BOOKS_HOST_CODEX_HOME:-./data/config/codex-disabled}:/codex-home
     secrets:
       - annas_secret_key
     depends_on:
       - calibre
       - kosync
+      - shelfmark
     restart: unless-stopped
 
   setup:
@@ -99,6 +101,35 @@ services:
       - "3000"
     restart: unless-stopped
 
+  shelfmark:
+    image: ghcr.io/calibrain/shelfmark:1.3.12
+    environment:
+      PUID: "${BOOKS_SHELFMARK_PUID:-1000}"
+      PGID: "${BOOKS_SHELFMARK_PGID:-1000}"
+      TZ: "${TZ:-UTC}"
+      SEARCH_MODE: direct
+      DIRECT_DOWNLOAD_ENABLED: "true"
+      DEFAULT_RELEASE_SOURCE: direct_download
+      BOOK_LANGUAGE: en
+      SUPPORTED_FORMATS: epub
+      BOOKS_OUTPUT_MODE: folder
+      DESTINATION: /books
+      FILE_ORGANIZATION: rename
+      TEMPLATE_RENAME: "{Title}"
+      AA_BASE_URL: auto
+      AA_MIRROR_URLS: "https://annas-archive.gl,https://annas-archive.pk,https://annas-archive.gd"
+      USE_CF_BYPASS: "true"
+    command: ["sh", "/books-shelfmark-entrypoint.sh"]
+    expose:
+      - "8084"
+    volumes:
+      - ${BOOKS_HOST_DATA_DIR:-./data}/shelfmark/config:/config
+      - ${BOOKS_HOST_DATA_DIR:-./data}/shelfmark/downloads:/books
+      - ./docker/shelfmark/entrypoint.sh:/books-shelfmark-entrypoint.sh:ro
+    secrets:
+      - annas_secret_key
+    restart: unless-stopped
+
   admin:
     image: books-runtime
     security_opt:
@@ -108,6 +139,7 @@ services:
       - .env
     volumes:
       - ${BOOKS_HOST_DATA_DIR:-./data}:/srv/books
+      - ${BOOKS_HOST_CODEX_HOME:-./data/config/codex-disabled}:/codex-home
     secrets:
       - annas_secret_key
     entrypoint: ["/app/docker/books/entrypoint.sh", "/app/src/cli.js"]

@@ -1,6 +1,6 @@
 # Architecture
 
-Books is a Docker Compose stack combining Calibre, a KOReader sync server, an nginx proxy, and small Node.js services into a single reading backend.
+Books is a Docker Compose stack combining Calibre, Shelfmark, a KOReader sync server, an nginx proxy, and small Node.js services into a single reading backend.
 
 ## Design
 
@@ -15,7 +15,7 @@ Users read through hosted Readest, OPDS-capable apps, KOReader, or CrossPoint. T
 
 ## Containers
 
-`compose.yaml` defines six services:
+`compose.yaml` defines seven services:
 
 | Service | Image | Role |
 |---|---|---|
@@ -23,12 +23,13 @@ Users read through hosted Readest, OPDS-capable apps, KOReader, or CrossPoint. T
 | `calibre` | `books-runtime` | `calibre-server` with Basic auth, OPDS, and downloads |
 | `kosync` | `koreader/kosync` (pinned by digest) | KOReader Sync Server backed by Redis |
 | `setup` | `books-runtime` | Credential-gated KOReader setup ZIP downloads |
+| `shelfmark` | `ghcr.io/calibrain/shelfmark:1.3.12` | Internal Anna's Archive search and download transport |
 | `worker` | `books-runtime` | Runs `hardcover sync` every minute |
 | `admin` | `books-runtime` | One-shot CLI container for owner commands |
 
-`calibre`, `setup`, `worker`, and `admin` all use the `books-runtime` image built from the repo. The `setup` service and `worker` restart continuously. The `admin` container uses the `admin` Compose profile and only runs via `docker compose run` — it does not start with `docker compose up`.
+`calibre`, `setup`, `worker`, and `admin` all use the `books-runtime` image built from the repo. The `setup` service and `worker` restart continuously. Shelfmark has no host port or public proxy route; only the worker and one-shot admin commands use its API over the Compose network. The `admin` container uses the `admin` Compose profile and only runs via `docker compose run` — it does not start with `docker compose up`.
 
-All four `books-runtime` services mount the data directory at `/srv/books`. The `kosync` container mounts its Redis data under `/srv/books/kosync`.
+All four `books-runtime` services mount the data directory at `/srv/books`. `setup`, `worker`, and `admin` also share the configured Codex home when Codex authentication is enabled. The `kosync` container mounts its Redis data under `/srv/books/kosync`.
 
 ## Routes
 
@@ -94,6 +95,7 @@ Runtime state lives under the data directory (`BOOKS_HOST_DATA_DIR`, default `./
 | `data/config/simpleui-2.1.koplugin/` | Cached SimpleUI plugin source copied into KOReader starter bundles |
 | `data/library/` | Calibre book library — EPUB files and metadata |
 | `data/downloads/` | Anna's Archive download cache |
+| `data/shelfmark/` | Shelfmark configuration and isolated download staging |
 | `data/import/` | Drop zone for manual EPUB imports |
 | `data/log/` | Container logs written by calibre-server, KOSync, and Redis |
 | `data/kosync/` | KOSync Redis data |
@@ -125,17 +127,17 @@ while true; do node src/cli.js hardcover sync; sleep 60; done
 Each `hardcover sync` pass:
 
 1. Reads the Want to Read list from the Hardcover GraphQL API for each user with a configured token.
-2. Searches Anna's Archive for candidates via the `annas-mcp` CLI binary.
-3. Keeps only English EPUB candidates whose normalized title and author match the request.
-4. Ranks eligible candidates by Anna download count, great-quality votes, list count, report count, and original search order.
-5. Grants an existing `hardcover:<book_id>` match to the requesting user, or downloads the winning file to `data/downloads/` as `<title>.epub` and imports it into Calibre for that user.
+2. Searches Anna's Archive through Shelfmark, first with the edition's ISBN-10 and ISBN-13 as separate queries, then by title and primary author only if neither ISBN branch has an eligible result.
+3. Keeps only candidates with a valid Anna MD5 that Shelfmark reports as an English EPUB, then deduplicates them by MD5.
+4. Fetches Anna's per-MD5 statistics and orders candidates by downloads, great-quality votes, list count, fewer reports, and original search order. A single candidate is selected directly. For multiple candidates, the existing Codex/OpenAI integration chooses exactly one supplied MD5 using title/author identity, collection and supplementary-work warnings, ISBN provenance, and those ordered statistics. It has no web or other tools. With zero candidates or an invalid/failed AI response, the item stays queued.
+5. Grants an existing `hardcover:<book_id>` match to the requesting user, or asks Shelfmark to download the winning MD5 into `data/shelfmark/downloads/` and imports the completed EPUB into Calibre for that user.
 6. Stores the Hardcover `book_id` in Calibre identifiers as `hardcover:<book_id>` so later progress pushes can match the same Hardcover book without relying on ISBN.
 7. Moves the Hardcover item from Want to Read to Currently Reading after the catalog grant succeeds.
 8. If a new file was downloaded, increments the VM-wide daily download counter in `state.json`.
 
 After intake, the same sync pass scans the user's visible EPUBs for KOSync progress. If a book has a stored `hardcover` identifier, the worker pushes progress only when that id matches exactly one current Hardcover row for the user. Manual imports without a stored Hardcover id can still be matched to existing Hardcover rows by exact normalized title/author, or created from an exact ISBN lookup. The push is one-way from KOSync to Hardcover and never decreases Hardcover progress.
 
-Items that fail (no match, download error, import error) are logged and stay on Want to Read. The worker picks them up again on the next five-minute cycle.
+Items that fail (no match, download error, import error) are logged and stay on Want to Read. The worker picks them up again on its next cycle.
 
 The download cap (`HARDCOVER_DAILY_DOWNLOAD_CAP`, default 10) is checked before each download and applies across all users. It resets at UTC midnight based on the date in `state.json`.
 

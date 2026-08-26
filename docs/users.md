@@ -127,19 +127,19 @@ docker compose run --rm admin hardcover clear-token alice
 ### How each Want to Read item is handled
 
 1. The worker reads the user's Want to Read list from the Hardcover GraphQL API.
-2. It searches Anna's Archive for candidates matching the title and author.
-3. It keeps only English EPUB candidates whose normalized title and author match the request.
-4. It ranks eligible candidates by Anna download count, great-quality votes, list count, report count, and original search order; the winner is granted if the Hardcover book is already present, otherwise downloaded as `<title>.epub` and imported.
+2. It searches Anna's Archive through Shelfmark, trying the edition's ISBN-10 and ISBN-13 before a title/author fallback.
+3. It keeps English EPUB candidates with a valid Anna MD5 and deduplicates them by MD5.
+4. It orders candidates by Anna download count, great-quality votes, list count, fewer reports, and original search order. One candidate is selected directly; multiple candidates go to the configured Codex/OpenAI selector, which must choose one supplied MD5. The winner is granted if the Hardcover book is already present, otherwise downloaded as `<title>.epub` and imported.
 5. The Calibre book records the Hardcover `book_id` as a `hardcover` identifier for future progress matching.
 6. The Hardcover item moves from Want to Read to Currently Reading after the book is visible in the user's catalog.
 7. New downloads increment the VM-wide daily download count.
 
 The same worker pass also pushes reading progress from KOSync back to Hardcover. For books fulfilled from Hardcover, progress is matched by the stored `hardcover` identifier. Manual imports can still match an existing Hardcover row by exact title/author, or create a row from an exact ISBN lookup. Progress only moves forward; the worker does not pull Hardcover progress into KOSync.
 
-## Optional AI dictionary
+## AI provider
 
-AI dictionary lookup is disabled unless `BOOKS_AI_PROVIDER` is set to `codex` or `openai`. `codex` mode uses a logged-in Codex home mounted with `BOOKS_HOST_CODEX_HOME`. `openai` mode uses `OPENAI_API_KEY`. Requests use the same Books login as OPDS/setup.
+AI dictionary lookup is disabled unless `BOOKS_AI_PROVIDER` is set to `codex` or `openai`; the same integration selects Anna candidates whenever more than one remains. `codex` mode uses a logged-in Codex home mounted with `BOOKS_HOST_CODEX_HOME`. `openai` mode uses `OPENAI_API_KEY`. Dictionary requests use the same Books login as OPDS/setup; candidate selection is internal to the worker/admin flow.
 
-Items with no match, a download error, or an import error are logged and stay on Want to Read. The worker retries on the next five-minute cycle.
+Items with no match, an AI selection error, a download error, or an import error are logged and stay on Want to Read. The worker retries on the next cycle.
 
 The download cap (`HARDCOVER_DAILY_DOWNLOAD_CAP` in `.env`, default 10) applies across all users and resets at UTC midnight.

@@ -26,6 +26,10 @@ Available variables:
 | `BOOKS_BIND_ADDR` | `127.0.0.1` | Address the proxy binds on |
 | `BOOKS_PROXY_PORT` | `8000` | Port the proxy listens on |
 | `BOOKS_HOST_DATA_DIR` | `./data` | Host path for library, state, logs, and KOSync data |
+| `BOOKS_AI_PROVIDER` | disabled | `codex` or `openai`; also used to select among multiple Anna candidates |
+| `BOOKS_AI_MODEL` | `gpt-5.4-mini` | Model used for AI dictionary and candidate selection |
+| `BOOKS_HOST_CODEX_HOME` | disabled directory | Host Codex home mounted read/write into setup, worker, and admin |
+| `OPENAI_API_KEY` | empty | API key used only when `BOOKS_AI_PROVIDER=openai` |
 | `HARDCOVER_DAILY_DOWNLOAD_CAP` | `10` | Max Anna's Archive downloads per UTC day across all users |
 
 Set `BOOKS_PUBLIC_HOST` to the hostname users will put into their reader apps. The OPDS and KOSync URLs that the server prints for users are derived from this value.
@@ -40,7 +44,7 @@ printf '%s' 'YOUR_ANNA_KEY_HERE' > secrets/annas_secret_key
 chmod 600 secrets/annas_secret_key
 ```
 
-The key is mounted into the worker and admin containers at `/run/secrets/annas_secret_key`. Keep it out of git. If you do not plan to use Hardcover intake, create the file anyway with a placeholder value — the worker will not download anything without a valid token configured for a user.
+The key is mounted into Shelfmark and, during the Shelfmark canary period, the worker and admin containers at `/run/secrets/annas_secret_key`. Keep it out of git. If you do not plan to use Hardcover intake, create the file anyway with a placeholder value — the worker will not download anything without a valid token configured for a user.
 
 ## Build and bootstrap
 
@@ -64,7 +68,7 @@ Run `bootstrap` once on a fresh install, before starting the stack. To run it ag
 docker compose up -d
 ```
 
-This starts `proxy`, `calibre`, `kosync`, `setup`, and `worker`. The `admin` container runs on demand and does not start here.
+This starts `proxy`, `calibre`, `kosync`, `setup`, `worker`, and `shelfmark`. The `admin` container runs on demand and does not start here. Shelfmark is reachable only from the internal Compose network at `http://shelfmark:8084`; it has no published host port or nginx route. It stores configuration and staging downloads under `data/shelfmark/` and does not mount or write the Calibre library.
 
 Verify everything is reachable:
 
